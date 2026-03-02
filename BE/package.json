@@ -1,0 +1,12 @@
+{
+  "name": "lumina-backend-supabase",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "supabase:start": "supabase start",
+    "supabase:db:push": "supabase db push",
+    "supabase:function:serve": "supabase functions serve api --no-verify-jwt",
+    "supabase:function:deploy": "supabase functions deploy api --no-verify-jwt"
+  }
+}
