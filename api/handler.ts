@@ -47,8 +47,133 @@ const PRODUCT_TEMPLATE_POOL = [
   }
 ];
 
+const CATEGORY_SEED_LIBRARY = [
+  {
+    category: 'Electronics',
+    image: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=800&q=80',
+    description: 'Modern electronic essentials designed for daily productivity and entertainment.',
+    productNames: ['Wireless Earbuds', 'Portable Monitor', 'Smart Home Hub', 'Noise Cancelling Headphones']
+  },
+  {
+    category: 'Accessories',
+    image: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=800&q=80',
+    description: 'Lifestyle accessories built for convenience, travel, and everyday carry.',
+    productNames: ['Travel Backpack', 'Leather Wallet', 'Crossbody Bag', 'Sunglasses Case']
+  },
+  {
+    category: 'Apparel',
+    image: 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=800&q=80',
+    description: 'Comfort-first apparel pieces that balance performance and style.',
+    productNames: ['Running Sneakers', 'Cotton Hoodie', 'Performance Joggers', 'Everyday Tee']
+  },
+  {
+    category: 'Home',
+    image: 'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80',
+    description: 'Curated home goods that elevate comfort and interior atmosphere.',
+    productNames: ['Desk Lamp', 'Aroma Diffuser', 'Ceramic Vase', 'Throw Blanket']
+  },
+  {
+    category: 'Fitness',
+    image: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=80',
+    description: 'Training-focused products for movement, recovery, and active routines.',
+    productNames: ['Yoga Block', 'Resistance Band Set', 'Foam Roller', 'Water Bottle Pro']
+  },
+  {
+    category: 'Office',
+    image: 'https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=800&q=80',
+    description: 'Office tools to improve focus, ergonomics, and workflow quality.',
+    productNames: ['Ergo Mouse', 'Standing Desk Riser', 'Cable Organizer', 'Notebook Set']
+  },
+  {
+    category: 'Beauty',
+    image: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=800&q=80',
+    description: 'Daily beauty products for skincare, grooming, and self-care.',
+    productNames: ['Hydrating Serum', 'Facial Cleanser', 'Makeup Brush Kit', 'Body Lotion']
+  },
+  {
+    category: 'Garden',
+    image: 'https://images.unsplash.com/photo-1416879595882-3373a0480b5b?w=800&q=80',
+    description: 'Garden essentials for plant care and outdoor home improvements.',
+    productNames: ['Plant Watering Can', 'Garden Tool Set', 'Planter Pot', 'Pruning Shears']
+  },
+  {
+    category: 'Kids',
+    image: 'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=800&q=80',
+    description: 'Kid-friendly items built for safety, comfort, and learning.',
+    productNames: ['Learning Puzzle Set', 'Kids Backpack', 'Story Book Bundle', 'Play Mat']
+  },
+  {
+    category: 'Automotive',
+    image: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=800&q=80',
+    description: 'Automotive accessories for cleaner, safer, and smarter driving.',
+    productNames: ['Car Phone Mount', 'Dash Camera', 'Seat Organizer', 'Tire Pressure Kit']
+  },
+  {
+    category: 'Books',
+    image: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=800&q=80',
+    description: 'Books and reading accessories for learning and leisure.',
+    productNames: ['Bestseller Collection', 'Hardcover Journal', 'Reading Light', 'Book Stand']
+  },
+  {
+    category: 'Pet Supplies',
+    image: 'https://images.unsplash.com/photo-1516734212186-65266f4d6e61?w=800&q=80',
+    description: 'Practical pet essentials for feeding, comfort, and enrichment.',
+    productNames: ['Pet Feeding Bowl', 'Dog Harness', 'Cat Toy Set', 'Pet Bed']
+  },
+  {
+    category: 'Gaming',
+    image: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?w=800&q=80',
+    description: 'Gaming gear tailored for comfort, speed, and immersive play.',
+    productNames: ['Mechanical Keyboard', 'Gaming Mouse', 'RGB Mousepad', 'Controller Stand']
+  },
+  {
+    category: 'Music',
+    image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=800&q=80',
+    description: 'Music equipment and accessories for creators and listeners.',
+    productNames: ['Studio Microphone', 'Bluetooth Speaker', 'MIDI Keyboard', 'Guitar Capo']
+  },
+  {
+    category: 'Travel',
+    image: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=800&q=80',
+    description: 'Travel gear that keeps packing organized and trips hassle-free.',
+    productNames: ['Carry-On Organizer', 'Neck Pillow', 'Travel Adapter', 'Luggage Tag Set']
+  },
+  {
+    category: 'Kitchen',
+    image: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=800&q=80',
+    description: 'Kitchen tools for prep, storage, and everyday cooking.',
+    productNames: ['Chef Knife Set', 'Food Storage Kit', 'Coffee Grinder', 'Cutting Board']
+  },
+  {
+    category: 'Sports',
+    image: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&q=80',
+    description: 'Sports equipment for training sessions and game-day performance.',
+    productNames: ['Training Cone Set', 'Basketball Pro', 'Sports Towel', 'Agility Ladder']
+  },
+  {
+    category: 'Health',
+    image: 'https://images.unsplash.com/photo-1530026405186-ed1f139313f8?w=800&q=80',
+    description: 'Health-focused products for wellness tracking and daily care.',
+    productNames: ['Digital Thermometer', 'Pill Organizer', 'Massage Gun', 'Air Purifier']
+  },
+  {
+    category: 'Jewelry',
+    image: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800&q=80',
+    description: 'Elegant jewelry pieces and organizers for personal style.',
+    productNames: ['Minimalist Necklace', 'Silver Bracelet', 'Ring Holder', 'Earring Set']
+  },
+  {
+    category: 'Outdoor',
+    image: 'https://images.unsplash.com/photo-1473445361085-b9a07f55608b?w=800&q=80',
+    description: 'Outdoor equipment for camping, hiking, and weekend adventures.',
+    productNames: ['Camping Lantern', 'Hiking Poles', 'Outdoor Blanket', 'Insulated Flask']
+  }
+];
+
 const FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Riley', 'Casey', 'Avery', 'Cameron', 'Finley', 'Reese'];
 const LAST_NAMES = ['Nguyen', 'Tran', 'Pham', 'Le', 'Hoang', 'Vo', 'Do', 'Bui', 'Dang', 'Huynh'];
+const DEFAULT_TOP_CATEGORY_LIMIT = 3;
+const TOP_CATEGORY_LIMIT_KEY = 'homepage_top_categories_limit';
 
 function readEnv(...keys: string[]) {
   for (const key of keys) {
@@ -105,6 +230,9 @@ function response(status: number, data: Json) {
     status,
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
@@ -116,6 +244,9 @@ function noContent() {
   return new Response(null, {
     status: 204,
     headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
@@ -274,19 +405,28 @@ async function nextProductId() {
   return (data?.[0]?.id || 0) + 1;
 }
 
-function buildDummyProducts(startId: number, count: number) {
+function buildCategoryPool(count: number) {
+  const pool = CATEGORY_SEED_LIBRARY.map((item) => item.category);
+  return pool.slice(0, Math.min(count, pool.length));
+}
+
+function buildDummyProducts(startId: number, count: number, categoryCount: number) {
+  const categories = buildCategoryPool(Math.max(1, Math.min(categoryCount, CATEGORY_SEED_LIBRARY.length)));
   return Array.from({ length: count }).map((_, idx) => {
-    const base = PRODUCT_TEMPLATE_POOL[idx % PRODUCT_TEMPLATE_POOL.length];
     const sku = startId + idx;
+    const category = categories[idx % categories.length];
+    const profile = CATEGORY_SEED_LIBRARY.find((item) => item.category === category);
+    const fallback = randomFrom(PRODUCT_TEMPLATE_POOL);
+    const baseName = profile?.productNames?.length ? randomFrom(profile.productNames) : fallback.name;
     return {
       id: sku,
-      name: `${base.name} ${sku}`,
+      name: `${baseName} ${sku}`,
       price: randomPrice(19, 399),
-      category: base.category,
-      image: base.image,
+      category,
+      image: profile?.image || fallback.image,
       rating: randomPrice(3.6, 5.0),
       reviews: randomInt(8, 500),
-      description: base.description
+      description: profile?.description || fallback.description
     };
   });
 }
@@ -395,6 +535,47 @@ async function clearNonAdminUsers(currentAdminId: string) {
   return removable.length;
 }
 
+function normalizeTopCategoryLimit(raw: unknown) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_TOP_CATEGORY_LIMIT;
+  return Math.min(Math.max(Math.floor(parsed), 1), 12);
+}
+
+function isMissingSettingsTableError(error: any) {
+  return (
+    error?.code === '42P01' ||
+    String(error?.message || '').toLowerCase().includes('app_settings')
+  );
+}
+
+async function readTopCategoryLimit() {
+  const { data, error } = await adminClient
+    .from('app_settings')
+    .select('value')
+    .eq('key', TOP_CATEGORY_LIMIT_KEY)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSettingsTableError(error)) return DEFAULT_TOP_CATEGORY_LIMIT;
+    throw error;
+  }
+
+  const value = data?.value;
+  if (typeof value === 'number') return normalizeTopCategoryLimit(value);
+  if (value && typeof value === 'object' && 'count' in value) {
+    return normalizeTopCategoryLimit((value as any).count);
+  }
+  return DEFAULT_TOP_CATEGORY_LIMIT;
+}
+
+async function writeTopCategoryLimit(raw: unknown) {
+  const topCategoryLimit = normalizeTopCategoryLimit(raw);
+  const { error } = await adminClient
+    .from('app_settings')
+    .upsert({ key: TOP_CATEGORY_LIMIT_KEY, value: { count: topCategoryLimit } }, { onConflict: 'key' });
+  if (error) throw error;
+  return topCategoryLimit;
+}
+
 async function requireAdmin(req: Request) {
   const user = await getUserFromAuth(req);
   if (user.role !== 'Admin') {
@@ -493,6 +674,11 @@ async function handleRequest(req: Request) {
 
       const categories = ['All', ...Array.from(new Set((data || []).map((x: any) => x.category)))];
       return response(200, { items: categories });
+    }
+
+    if (path === '/settings' && req.method === 'GET') {
+      const topCategoryLimit = await readTopCategoryLimit();
+      return response(200, { topCategoryLimit });
     }
 
     if (path.startsWith('/products/') && req.method === 'GET') {
@@ -1271,17 +1457,24 @@ async function handleRequest(req: Request) {
       const productCount = Math.min(Math.max(Number(body.productCount || 8), 0), 100);
       const orderCount = Math.min(Math.max(Number(body.orderCount || 12), 0), 200);
       const userCount = Math.min(Math.max(Number(body.userCount || 6), 0), 100);
+      const categoryCount = Math.min(Math.max(Number(body.categoryCount || 4), 1), 20);
 
       let insertedProducts = 0;
       let insertedUsers = 0;
       let insertedOrders = 0;
+      let seededCategoryCount = 0;
+      let seededCategories: string[] = [];
 
       if (targets.has('products') && productCount > 0) {
+        // Ensure category variety is respected: at least one product per requested category.
+        const effectiveProductCount = Math.max(productCount, categoryCount);
         const startId = await nextProductId();
-        const productsToInsert = buildDummyProducts(startId, productCount);
+        const productsToInsert = buildDummyProducts(startId, effectiveProductCount, categoryCount);
         const { error } = await adminClient.from('products').insert(productsToInsert);
         if (error) throw error;
         insertedProducts = productsToInsert.length;
+        seededCategories = [...new Set(productsToInsert.map((item) => item.category))];
+        seededCategoryCount = seededCategories.length;
       }
 
       if (targets.has('users') && userCount > 0) {
@@ -1322,8 +1515,17 @@ async function handleRequest(req: Request) {
         targets: [...targets],
         insertedProducts,
         insertedUsers,
-        insertedOrders
+        insertedOrders,
+        seededCategoryCount,
+        seededCategories
       });
+    }
+
+    if (path === '/admin/settings' && req.method === 'PATCH') {
+      await requireAdmin(req);
+      const body = await readJson(req);
+      const topCategoryLimit = await writeTopCategoryLimit(body.topCategoryLimit);
+      return response(200, { topCategoryLimit });
     }
 
     if (path === '/orders' && req.method === 'GET') {
