@@ -465,21 +465,24 @@ async function handleRequest(req: Request) {
         return response(400, { error: 'name, email and password are required' });
       }
 
-      const { data, error } = await authClient.auth.signUp({
+      const { data: createdData, error: createError } = await adminClient.auth.admin.createUser({
         email,
         password,
-        options: {
-          data: { name }
-        }
+        email_confirm: true,
+        user_metadata: { name }
       });
 
-      if (error) {
-        const message = String(error.message || '');
+      if (createError) {
+        const message = String(createError.message || '');
         const lower = message.toLowerCase();
 
-        // When signup is rate-limited, try login so repeated register attempts
-        // for an existing account can still succeed.
-        if (lower.includes('rate limit')) {
+        // Existing account or signup throttled: try login and continue.
+        if (
+          lower.includes('already') ||
+          lower.includes('registered') ||
+          lower.includes('exists') ||
+          lower.includes('rate limit')
+        ) {
           const { data: loginData, error: loginError } = await authClient.auth.signInWithPassword({
             email,
             password
@@ -497,29 +500,33 @@ async function handleRequest(req: Request) {
               session: loginData.session
             });
           }
-
-          return response(429, {
-            error:
-              'Signup temporarily rate-limited. Try again later or sign in if this account already exists.'
-          });
         }
 
         return response(400, { error: message });
       }
 
+      const { data: loginData, error: loginError } = await authClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (loginError) {
+        return response(400, { error: loginError.message });
+      }
+
       let profile = null;
-      if (data.user?.id) {
+      if (createdData.user?.id) {
         const profileResult = await adminClient
           .from('profiles')
           .select('id,name,email,role,status,created_at')
-          .eq('id', data.user.id)
+          .eq('id', createdData.user.id)
           .maybeSingle();
         profile = profileResult.data;
       }
 
       return response(201, {
-        user: profile || data.user,
-        session: data.session
+        user: profile || createdData.user,
+        session: loginData.session
       });
     }
 
