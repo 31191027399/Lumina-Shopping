@@ -473,7 +473,39 @@ async function handleRequest(req: Request) {
         }
       });
 
-      if (error) return response(400, { error: error.message });
+      if (error) {
+        const message = String(error.message || '');
+        const lower = message.toLowerCase();
+
+        // When signup is rate-limited, try login so repeated register attempts
+        // for an existing account can still succeed.
+        if (lower.includes('rate limit')) {
+          const { data: loginData, error: loginError } = await authClient.auth.signInWithPassword({
+            email,
+            password
+          });
+
+          if (!loginError && loginData.user) {
+            const profileResult = await adminClient
+              .from('profiles')
+              .select('id,name,email,role,status,created_at')
+              .eq('id', loginData.user.id)
+              .maybeSingle();
+
+            return response(200, {
+              user: profileResult.data || loginData.user,
+              session: loginData.session
+            });
+          }
+
+          return response(429, {
+            error:
+              'Signup temporarily rate-limited. Try again later or sign in if this account already exists.'
+          });
+        }
+
+        return response(400, { error: message });
+      }
 
       let profile = null;
       if (data.user?.id) {

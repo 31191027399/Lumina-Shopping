@@ -1497,7 +1497,6 @@ const Login = ({ onLoginSuccess, onNavigate }) => {
         </form>
         {error && <p className="text-xs text-rose-500 font-bold mt-4">{error}</p>}
         <p className="text-xs font-black text-center mt-12 text-gray-400 uppercase tracking-widest">{isLogin ? 'New?' : 'Member?'} <button onClick={() => setIsLogin(!isLogin)} className="text-indigo-600 underline">Switch</button></p>
-        <p className="text-[9px] text-center mt-4 text-gray-300 font-bold uppercase tracking-[0.2em]">Hint: Use admin@example.com for admin access</p>
       </div>
     </div>
   );
