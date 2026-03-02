@@ -370,6 +370,7 @@ const Shop = ({ onAddToCart, onProductClick, products, categories }) => {
 
 const AdminDashboard = ({
   products,
+  categories,
   users,
   orders,
   currentUserId,
@@ -414,6 +415,7 @@ const AdminDashboard = ({
   const [dataControlLoading, setDataControlLoading] = useState(false);
   const [dataControlTargets, setDataControlTargets] = useState(['catalog']);
   const [seedCounts, setSeedCounts] = useState({ productCount: 8, userCount: 6, orderCount: 12 });
+  const [environmentLabel] = useState('Staging-01');
 
   // Statistics
   const stats = [
@@ -422,6 +424,68 @@ const AdminDashboard = ({
     { label: "Active Orders", value: orders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length, icon: <ShoppingBag />, trend: "+18.1%", color: "emerald" },
     { label: "Conversion", value: "4.8%", icon: <ArrowUpRight />, trend: "-0.4%", color: "amber" },
   ];
+  const pulseSeries = useMemo(() => {
+    const bucketCount = 12;
+    const buckets = Array.from({ length: bucketCount }, () => 0);
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    orders.forEach((order) => {
+      const rawDate = order.createdAt || order.date;
+      if (!rawDate) return;
+      const parsed = new Date(rawDate);
+      if (Number.isNaN(parsed.getTime())) return;
+
+      const orderDayStart = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+      const dayDiff = Math.floor((todayStart - orderDayStart) / dayMs);
+      if (dayDiff >= 0 && dayDiff < bucketCount) {
+        const index = bucketCount - 1 - dayDiff;
+        buckets[index] += 1;
+      }
+    });
+
+    const max = Math.max(...buckets, 0);
+    if (max === 0) {
+      return buckets.map(() => ({ count: 0, height: 8 }));
+    }
+
+    return buckets.map((count) => ({
+      count,
+      height: Math.max(10, Math.round((count / max) * 100))
+    }));
+  }, [orders]);
+  const dataManagerTargets = [
+    { id: 'orders', label: 'Orders', icon: '📦' },
+    { id: 'products', label: 'Products', icon: '🏷️' },
+    { id: 'catalog', label: 'Catalog', icon: '📚' },
+    { id: 'users', label: 'Non-Admin Users', icon: '👥' }
+  ];
+
+  const selectedDataTargetCount = dataControlTargets.length;
+  const allDataTargetsSelected = dataManagerTargets.every((target) => dataControlTargets.includes(target.id));
+
+  const getDataTargetCount = (targetId) => {
+    if (targetId === 'orders') return orders.length;
+    if (targetId === 'products') return products.length;
+    if (targetId === 'catalog') return Math.max(categories.filter((category) => category !== 'All').length, 0);
+    return users.filter((item) => item.role !== 'Admin').length;
+  };
+
+  const getSeedAmountValue = (targetId) => {
+    if (targetId === 'orders') return seedCounts.orderCount;
+    if (targetId === 'users') return seedCounts.userCount;
+    return seedCounts.productCount;
+  };
+
+  const updateSeedAmountValue = (targetId, rawValue) => {
+    const value = Math.max(Number(rawValue || 0), 0);
+    setSeedCounts((prev) => {
+      if (targetId === 'orders') return { ...prev, orderCount: value };
+      if (targetId === 'users') return { ...prev, userCount: value };
+      return { ...prev, productCount: value };
+    });
+  };
 
   // User Actions
   const toggleUserSelection = (id) => {
@@ -659,142 +723,139 @@ const AdminDashboard = ({
                 </div>
               ))}
             </div>
-            {/* Visual Charts Placeholder */}
             <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50">
                 <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-8">System Pulse</h3>
                 <div className="h-64 flex items-end gap-3">
-                  {[45, 60, 30, 80, 55, 90, 70, 40, 85, 30, 60, 75].map((h, i) => (
-                    <div key={i} className="flex-1 bg-gray-50 rounded-xl relative group">
-                      <div className="absolute bottom-0 left-0 right-0 bg-indigo-600 rounded-xl group-hover:bg-indigo-400 transition-all duration-500" style={{ height: `${h}%` }}></div>
+                  {pulseSeries.map((point, i) => (
+                    <div key={i} className="flex-1 bg-gray-50 rounded-xl relative group" title={`${point.count} order(s)`}>
+                      <div
+                        className="absolute bottom-0 left-0 right-0 bg-indigo-600 rounded-xl group-hover:bg-indigo-400 transition-all duration-500"
+                        style={{ height: `${point.height}%` }}
+                      ></div>
                     </div>
                   ))}
                 </div>
+                <p className="text-[11px] font-bold text-gray-400 mt-4">Last 12 days of order volume</p>
             </div>
 
-            <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50 space-y-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Clear</h3>
-              <p className="text-sm text-gray-500">Testing-only tool to clear selected DB content.</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { id: 'orders', label: 'Orders' },
-                  { id: 'products', label: 'Products' },
-                  { id: 'catalog', label: 'Catalog' },
-                  { id: 'users', label: 'Non-Admin Users' }
-                ].map((target) => (
-                  <label
-                    key={target.id}
-                    className="flex items-center gap-2 text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-xl"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={dataControlTargets.includes(target.id)}
-                      onChange={(e) => {
-                        setDataControlTargets((prev) =>
-                          e.target.checked
-                            ? [...new Set([...prev, target.id])]
-                            : prev.filter((item) => item !== target.id)
-                        );
-                      }}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
-                    />
-                    {target.label}
-                  </label>
-                ))}
+          </div>
+        );
+      case 'data-manager':
+        return (
+          <div className="bg-slate-100/80 border border-slate-200 rounded-[2.5rem] overflow-hidden animate-in fade-in duration-500">
+            <div className="px-8 py-7 border-b border-slate-200 bg-white/70">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Data Control Center</h3>
+                  <p className="text-sm md:text-base text-slate-600 font-medium">Quickly manage database states for testing environments.</p>
+                </div>
+                <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-4 py-2">
+                  <Info size={14} />
+                  Environment: <span className="text-amber-600">{environmentLabel}</span>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
+            </div>
+
+            <div className="px-8 py-7 space-y-5">
+              <div className="hidden md:grid grid-cols-[1.6fr_1fr_180px] px-4 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() =>
+                      setDataControlTargets(allDataTargetsSelected ? [] : dataManagerTargets.map((target) => target.id))
+                    }
+                    className="hover:text-indigo-600 transition-colors"
+                  >
+                    {allDataTargetsSelected ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <span>Category</span>
+                </div>
+                <span className="justify-self-end">Current Status</span>
+                <span className="justify-self-end">Seed Amount</span>
+              </div>
+
+              <div className="space-y-3">
+                {dataManagerTargets.map((target) => {
+                  const selected = dataControlTargets.includes(target.id);
+                  return (
+                    <div
+                      key={target.id}
+                      className={`grid grid-cols-1 md:grid-cols-[1.6fr_1fr_180px] items-center gap-4 px-5 py-4 rounded-2xl border transition-colors ${
+                        selected ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-slate-100/80'
+                      }`}
+                    >
+                      <label className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) => {
+                            setDataControlTargets((prev) =>
+                              e.target.checked
+                                ? [...new Set([...prev, target.id])]
+                                : prev.filter((item) => item !== target.id)
+                            );
+                          }}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 w-6 h-6"
+                        />
+                        <span className="text-xl">{target.icon}</span>
+                        <span className={`text-2xl leading-none md:text-[2rem] md:leading-none font-black tracking-tight ${selected ? 'text-slate-900' : 'text-slate-500'} hidden`}>{target.label}</span>
+                        <span className={`text-sm md:text-2xl font-black tracking-tight ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{target.label}</span>
+                      </label>
+
+                      <div className="justify-self-start md:justify-self-end flex items-center gap-2">
+                        <span className="text-emerald-600 font-black text-xl md:text-3xl tracking-tight">
+                          {getDataTargetCount(target.id).toLocaleString()}
+                        </span>
+                        <span className="text-slate-400 text-[11px] font-black uppercase tracking-widest">Records</span>
+                      </div>
+
+                      <div className="justify-self-start md:justify-self-end">
+                        <input
+                          type="number"
+                          min={0}
+                          value={getSeedAmountValue(target.id)}
+                          disabled={!selected}
+                          onChange={(e) => updateSeedAmountValue(target.id, e.target.value)}
+                          className={`w-32 px-4 py-3 rounded-xl border text-lg font-black outline-none ${
+                            selected
+                              ? 'border-slate-300 bg-white text-slate-900'
+                              : 'border-slate-200 bg-slate-100 text-slate-300 cursor-not-allowed'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="px-8 py-6 border-t border-slate-200 bg-slate-100/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 text-sm font-black">
+                <CheckCircle size={16} />
+                {selectedDataTargetCount} Categories Selected
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
                 <button
-                  disabled={dataControlLoading}
+                  disabled={dataControlLoading || selectedDataTargetCount === 0}
                   onClick={() => runDataControl('clear', { targets: dataControlTargets })}
-                  className="px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 disabled:opacity-40"
+                  className="px-6 py-3 bg-rose-50 border-2 border-rose-100 text-rose-600 rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-rose-100 disabled:opacity-40"
                 >
                   Clear Selected
                 </button>
-              </div>
-            </div>
-          </div>
-        );
-      case 'seeding':
-        return (
-          <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50 space-y-4 animate-in fade-in duration-500">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Seeding</h3>
-            <p className="text-sm text-gray-500">Seed selected datasets with controlled record volumes.</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { id: 'orders', label: 'Orders' },
-                { id: 'products', label: 'Products' },
-                { id: 'catalog', label: 'Catalog' },
-                { id: 'users', label: 'Non-Admin Users' }
-              ].map((target) => (
-                <label
-                  key={target.id}
-                  className="flex items-center gap-2 text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-xl"
+                <button
+                  disabled={dataControlLoading || selectedDataTargetCount === 0}
+                  onClick={() =>
+                    runDataControl('seed', {
+                      targets: dataControlTargets,
+                      productCount: seedCounts.productCount,
+                      userCount: seedCounts.userCount,
+                      orderCount: seedCounts.orderCount
+                    })
+                  }
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
                 >
-                  <input
-                    type="checkbox"
-                    checked={dataControlTargets.includes(target.id)}
-                    onChange={(e) => {
-                      setDataControlTargets((prev) =>
-                        e.target.checked
-                          ? [...new Set([...prev, target.id])]
-                          : prev.filter((item) => item !== target.id)
-                      );
-                    }}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
-                  />
-                  {target.label}
-                </label>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={seedCounts.productCount}
-                onChange={(e) =>
-                  setSeedCounts((prev) => ({ ...prev, productCount: Number(e.target.value || 0) }))
-                }
-                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                placeholder="Products to seed"
-              />
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={seedCounts.userCount}
-                onChange={(e) =>
-                  setSeedCounts((prev) => ({ ...prev, userCount: Number(e.target.value || 0) }))
-                }
-                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                placeholder="Users to seed"
-              />
-              <input
-                type="number"
-                min={0}
-                max={200}
-                value={seedCounts.orderCount}
-                onChange={(e) =>
-                  setSeedCounts((prev) => ({ ...prev, orderCount: Number(e.target.value || 0) }))
-                }
-                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                placeholder="Orders to seed"
-              />
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <button
-                disabled={dataControlLoading}
-                onClick={() =>
-                  runDataControl('seed', {
-                    targets: dataControlTargets,
-                    productCount: seedCounts.productCount,
-                    userCount: seedCounts.userCount,
-                    orderCount: seedCounts.orderCount
-                  })
-                }
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
-              >
-                Seed Selected
-              </button>
+                  Seed Selected
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -1041,7 +1102,7 @@ const AdminDashboard = ({
           </div>
           {[
             { id: 'statistics', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-            { id: 'seeding', label: 'Seeding', icon: <Package size={20} /> },
+            { id: 'data-manager', label: 'Data Manager', icon: <Package size={20} /> },
             { id: 'catalog', label: 'Catalog', icon: <Package size={20} /> },
             { id: 'users', label: 'Users', icon: <UsersIcon size={20} /> },
             { id: 'orders', label: 'Orders', icon: <ShoppingBag size={20} /> },
@@ -1375,6 +1436,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [userOrders, setUserOrders] = useState([]);
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('lumina_access_token') || '');
+  const [recoveryTokens, setRecoveryTokens] = useState(null);
   const [toast, setToast] = useState(null);
   const categoryImageMap = useMemo(
     () => ({
@@ -1481,6 +1543,23 @@ export default function App() {
       await fetchAdminData(token);
     }
   };
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const accessToken = hash.get('access_token') || '';
+    const refreshToken = hash.get('refresh_token') || '';
+    const recoveryType = hash.get('type') || query.get('type') || '';
+    const shouldOpenResetPage =
+      query.get('reset_password') === '1' || recoveryType === 'recovery' || Boolean(accessToken);
+
+    if (accessToken && refreshToken) {
+      setRecoveryTokens({ accessToken, refreshToken });
+    }
+    if (shouldOpenResetPage) {
+      setCurrentPage('resetPassword');
+    }
+  }, []);
 
   useEffect(() => {
     const bootstrapUser = async () => {
@@ -1603,6 +1682,33 @@ export default function App() {
     navigateTo('home');
   };
 
+  const handlePasswordResetRequest = async (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new Error('Email is required');
+    }
+
+    const redirectTo = `${window.location.origin}${window.location.pathname}?reset_password=1`;
+    await apiRequest('/auth/password-reset', {
+      method: 'POST',
+      body: { email: normalizedEmail, redirectTo },
+      token: ''
+    });
+    setToast('If the account exists, a reset email has been sent');
+  };
+
+  const handlePasswordResetConfirm = async ({ accessToken, refreshToken, password }) => {
+    await apiRequest('/auth/password-reset/confirm', {
+      method: 'POST',
+      body: { accessToken, refreshToken, password },
+      token: ''
+    });
+    setRecoveryTokens(null);
+    setToast('Password updated. Please sign in.');
+    window.history.replaceState({}, '', window.location.pathname);
+    navigateTo('login');
+  };
+
   const handleAdminUserUpdate = async (userId, updates) => {
     const data = await apiRequest(`/admin/users/${userId}`, { method: 'PATCH', body: updates });
     setUsers((prev) => prev.map((item) => (item.id === userId ? data.user : item)));
@@ -1697,6 +1803,7 @@ export default function App() {
       case 'admin': return (
         <AdminDashboard
           products={products}
+          categories={categories}
           users={users}
           orders={orders}
           currentUserId={user?.id}
@@ -1725,10 +1832,25 @@ export default function App() {
       case 'login': return (
         <Login 
           onLoginSuccess={handleAuth}
+          onRequestPasswordReset={handlePasswordResetRequest}
           onNavigate={navigateTo} 
         />
       );
-      case 'profile': return <Profile user={user} orders={userOrders} onLogout={handleLogout} />;
+      case 'resetPassword': return (
+        <ResetPassword
+          onResetPassword={handlePasswordResetConfirm}
+          onNavigate={navigateTo}
+          recoveryTokens={recoveryTokens}
+        />
+      );
+      case 'profile': return (
+        <Profile
+          user={user}
+          orders={userOrders}
+          onLogout={handleLogout}
+          onRequestPasswordReset={handlePasswordResetRequest}
+        />
+      );
       case 'checkout': return <Checkout cart={cart} onComplete={handleOrderComplete} onNavigate={navigateTo} />;
       case 'success': return <Success onNavigate={navigateTo} />;
       case 'productDetail': return selectedProduct ? (
@@ -1836,40 +1958,75 @@ const Cart = ({ cart, onUpdateQty, onRemove, onCheckout, onNavigate }) => {
   );
 };
 
-const Profile = ({ user, orders, onLogout }) => (
-  <div className="max-w-4xl mx-auto px-4 py-16 animate-in slide-in-from-bottom-8">
-    <div className="bg-white rounded-[3rem] border-2 border-gray-50 shadow-2xl overflow-hidden">
-      <div className="bg-gradient-to-r from-indigo-600 to-violet-600 h-48 relative">
-        <div className="absolute -bottom-16 left-12 w-32 h-32 rounded-[2.5rem] bg-white p-1.5 shadow-xl"><div className="w-full h-full rounded-[2rem] bg-indigo-50 flex items-center justify-center text-indigo-600"><User size={48} /></div></div>
-      </div>
-      <div className="pt-20 px-12 pb-12">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b border-gray-100 pb-12 mb-12">
-          <div>
-            <h1 className="text-4xl font-black text-gray-900 tracking-tight">{user?.name}</h1>
-            <p className="text-gray-500 font-medium">{user?.email}</p>
-            <span className="inline-block mt-2 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-full uppercase tracking-widest">{user?.role}</span>
-          </div>
-          <button onClick={onLogout} className="px-6 py-3 bg-red-50 rounded-2xl font-bold text-red-600 hover:bg-red-100 flex items-center gap-2"><LogOut size={18} /> Sign Out</button>
+const Profile = ({ user, orders, onLogout, onRequestPasswordReset }) => {
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [resetError, setResetError] = useState('');
+
+  const handlePasswordReset = async () => {
+    if (!onRequestPasswordReset) return;
+    setResetMessage('');
+    setResetError('');
+    setIsResetting(true);
+    try {
+      await onRequestPasswordReset(user?.email || '');
+      setResetMessage('Password reset email sent. Please check your inbox.');
+    } catch (err) {
+      setResetError(err.message || 'Failed to send reset email');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-16 animate-in slide-in-from-bottom-8">
+      <div className="bg-white rounded-[3rem] border-2 border-gray-50 shadow-2xl overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 h-48 relative">
+          <div className="absolute -bottom-16 left-12 w-32 h-32 rounded-[2.5rem] bg-white p-1.5 shadow-xl"><div className="w-full h-full rounded-[2rem] bg-indigo-50 flex items-center justify-center text-indigo-600"><User size={48} /></div></div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner">
-            <h3 className="text-xl font-bold mb-4">Orders</h3>
-            <p className="text-sm text-gray-400">
-              {orders?.length ? `${orders.length} order(s) in history` : 'No orders yet'}
-            </p>
+        <div className="pt-20 px-12 pb-12">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b border-gray-100 pb-12 mb-12">
+            <div>
+              <h1 className="text-4xl font-black text-gray-900 tracking-tight">{user?.name}</h1>
+              <p className="text-gray-500 font-medium">{user?.email}</p>
+              <span className="inline-block mt-2 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-full uppercase tracking-widest">{user?.role}</span>
+            </div>
+            <button onClick={onLogout} className="px-6 py-3 bg-red-50 rounded-2xl font-bold text-red-600 hover:bg-red-100 flex items-center gap-2"><LogOut size={18} /> Sign Out</button>
           </div>
-          <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner"><h3 className="text-xl font-bold mb-4">Settings</h3><p className="text-sm text-gray-400">Manage account</p></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner">
+              <h3 className="text-xl font-bold mb-4">Orders</h3>
+              <p className="text-sm text-gray-400">
+                {orders?.length ? `${orders.length} order(s) in history` : 'No orders yet'}
+              </p>
+            </div>
+            <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner space-y-3">
+              <h3 className="text-xl font-bold">Settings</h3>
+              <p className="text-sm text-gray-400">Manage account</p>
+              <button
+                onClick={handlePasswordReset}
+                disabled={isResetting}
+                className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {isResetting ? 'Sending...' : 'Reset Password via Email'}
+              </button>
+              {resetMessage && <p className="text-xs font-bold text-emerald-600">{resetMessage}</p>}
+              {resetError && <p className="text-xs font-bold text-rose-500">{resetError}</p>}
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
-const Login = ({ onLoginSuccess, onNavigate }) => {
+const Login = ({ onLoginSuccess, onNavigate, onRequestPasswordReset }) => {
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1888,6 +2045,26 @@ const Login = ({ onLoginSuccess, onNavigate }) => {
       setIsLoading(false);
     }
   };
+
+  const handleForgotPassword = async () => {
+    const email = String(formData.email || '').trim();
+    if (!email) {
+      setError('Enter your email first to reset password');
+      return;
+    }
+    setError('');
+    setResetMessage('');
+    setIsResetting(true);
+    try {
+      await onRequestPasswordReset(email);
+      setResetMessage('Password reset email sent. Please check your inbox.');
+    } catch (err) {
+      setError(err.message || 'Failed to send reset email');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="flex items-center justify-center py-24 px-4 bg-gray-50/50">
       <div className="max-w-md w-full bg-white rounded-[3rem] shadow-2xl p-12 animate-in slide-in-from-top-4">
@@ -1896,10 +2073,101 @@ const Login = ({ onLoginSuccess, onNavigate }) => {
           {!isLogin && <input type="text" placeholder="Name" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, name: e.target.value})} />}
           <input type="email" placeholder="email@example.com" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, email: e.target.value})} />
           <input type="password" placeholder="••••••••" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, password: e.target.value})} />
+          {isLogin && (
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={isResetting}
+              className="text-xs font-black uppercase tracking-widest text-indigo-600 hover:underline disabled:opacity-40"
+            >
+              {isResetting ? 'Sending reset email...' : 'Forgot password? Send reset email'}
+            </button>
+          )}
           <button disabled={isLoading} className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs">{isLoading ? 'Wait...' : (isLogin ? 'Sign In' : 'Join')}</button>
         </form>
         {error && <p className="text-xs text-rose-500 font-bold mt-4">{error}</p>}
+        {resetMessage && <p className="text-xs text-emerald-600 font-bold mt-4">{resetMessage}</p>}
         <p className="text-xs font-black text-center mt-12 text-gray-400 uppercase tracking-widest">{isLogin ? 'New?' : 'Member?'} <button onClick={() => setIsLogin(!isLogin)} className="text-indigo-600 underline">Switch</button></p>
+      </div>
+    </div>
+  );
+};
+
+const ResetPassword = ({ onResetPassword, onNavigate, recoveryTokens }) => {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (!recoveryTokens?.accessToken || !recoveryTokens?.refreshToken) {
+      setError('Recovery session is missing. Open the newest reset link from your email.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await onResetPassword({
+        accessToken: recoveryTokens.accessToken,
+        refreshToken: recoveryTokens.refreshToken,
+        password
+      });
+      setSuccess('Password updated successfully. You can sign in now.');
+    } catch (err) {
+      setError(err.message || 'Failed to reset password');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center py-24 px-4 bg-gray-50/50">
+      <div className="max-w-md w-full bg-white rounded-[3rem] shadow-2xl p-12 animate-in slide-in-from-top-4">
+        <h2 className="text-4xl font-black text-gray-900 mb-2">Set New Password</h2>
+        <p className="text-sm text-gray-400 mb-8">Use a strong password for your account.</p>
+        <form className="space-y-6" onSubmit={handleSubmit}>
+          <input
+            type="password"
+            placeholder="New password"
+            className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="Confirm new password"
+            className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          <button
+            disabled={isLoading}
+            className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs disabled:opacity-40"
+          >
+            {isLoading ? 'Updating...' : 'Update Password'}
+          </button>
+        </form>
+        {error && <p className="text-xs text-rose-500 font-bold mt-4">{error}</p>}
+        {success && <p className="text-xs text-emerald-600 font-bold mt-4">{success}</p>}
+        <button
+          onClick={() => onNavigate('login')}
+          className="text-xs font-black uppercase tracking-widest text-indigo-600 underline mt-8"
+        >
+          Back to Login
+        </button>
       </div>
     </div>
   );

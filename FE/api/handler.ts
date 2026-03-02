@@ -606,6 +606,62 @@ async function handleRequest(req: Request) {
       });
     }
 
+    if (path === '/auth/password-reset' && req.method === 'POST') {
+      const body = await readJson(req);
+      const email = String(body.email || '').trim().toLowerCase();
+      const redirectTo = String(body.redirectTo || '').trim();
+
+      if (!email) {
+        return response(400, { error: 'email is required' });
+      }
+
+      const { error } = await authClient.auth.resetPasswordForEmail(
+        email,
+        redirectTo ? { redirectTo } : undefined
+      );
+
+      if (error) {
+        return response(400, { error: error.message });
+      }
+
+      return response(200, {
+        ok: true,
+        message: 'If the account exists, a password reset email has been sent.'
+      });
+    }
+
+    if (path === '/auth/password-reset/confirm' && req.method === 'POST') {
+      const body = await readJson(req);
+      const accessToken = String(body.accessToken || '').trim();
+      const refreshToken = String(body.refreshToken || '').trim();
+      const password = String(body.password || '');
+
+      if (!accessToken || !refreshToken) {
+        return response(400, { error: 'Recovery tokens are required' });
+      }
+      if (password.length < 6) {
+        return response(400, { error: 'Password must be at least 6 characters' });
+      }
+
+      const { error: sessionError } = await authClient.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
+      if (sessionError) {
+        return response(400, { error: sessionError.message });
+      }
+
+      const { data, error } = await authClient.auth.updateUser({ password });
+      if (error) {
+        return response(400, { error: error.message });
+      }
+
+      return response(200, {
+        ok: true,
+        user: data.user || null
+      });
+    }
+
     if (path === '/auth/me' && req.method === 'GET') {
       const user = await getUserFromAuth(req);
 
@@ -919,6 +975,7 @@ async function handleRequest(req: Request) {
         id: `#ORD-${String(o.id).padStart(4, '0')}`,
         orderId: o.id,
         customer: profile?.name || profile?.email || 'Unknown',
+        createdAt: o.created_at,
         date: formatShortDate(o.created_at),
         total: Number(o.total),
         status: o.status
@@ -962,6 +1019,7 @@ async function handleRequest(req: Request) {
           id: `#ORD-${String(data.id).padStart(4, '0')}`,
           orderId: data.id,
           customer: profile?.name || profile?.email || 'Unknown',
+          createdAt: data.created_at,
           date: formatShortDate(data.created_at),
           total: Number(data.total),
           status: data.status
