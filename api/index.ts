@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
+import { createClient } from '@supabase/supabase-js';
 
 type Json = Record<string, unknown>;
 
@@ -52,7 +52,7 @@ const LAST_NAMES = ['Nguyen', 'Tran', 'Pham', 'Le', 'Hoang', 'Vo', 'Do', 'Bui', 
 
 function readEnv(...keys: string[]) {
   for (const key of keys) {
-    const value = Deno.env.get(key);
+    const value = process.env[key];
     if (value) return value;
   }
   return '';
@@ -374,7 +374,7 @@ async function getCartSummary(userId: string) {
   };
 }
 
-Deno.serve(async (req) => {
+async function handleRequest(req: Request) {
   if (req.method === 'OPTIONS') {
     return noContent();
   }
@@ -1041,4 +1041,51 @@ Deno.serve(async (req) => {
     console.error(error);
     return response(500, { error: message });
   }
-});
+}
+
+export default async function handler(nodeReq: any, nodeRes: any) {
+  const proto = (nodeReq.headers['x-forwarded-proto'] || 'https') as string;
+  const host =
+    (nodeReq.headers['x-forwarded-host'] as string) ||
+    (nodeReq.headers.host as string) ||
+    'localhost';
+  const url = new URL(nodeReq.url || '/', `${proto}://${host}`);
+
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(nodeReq.headers || {})) {
+    if (Array.isArray(value)) {
+      headers.set(key, value.join(','));
+    } else if (value != null) {
+      headers.set(key, String(value));
+    }
+  }
+
+  const method = String(nodeReq.method || 'GET').toUpperCase();
+  let body: BodyInit | undefined;
+  if (method !== 'GET' && method !== 'HEAD' && nodeReq.body != null) {
+    if (typeof nodeReq.body === 'string' || nodeReq.body instanceof Uint8Array) {
+      body = nodeReq.body;
+    } else {
+      body = JSON.stringify(nodeReq.body);
+      if (!headers.has('content-type')) {
+        headers.set('content-type', 'application/json');
+      }
+    }
+  }
+
+  const request = new Request(url.toString(), { method, headers, body });
+  const response = await handleRequest(request);
+
+  nodeRes.statusCode = response.status;
+  response.headers.forEach((value, key) => {
+    nodeRes.setHeader(key, value);
+  });
+
+  if (response.status === 204) {
+    nodeRes.end();
+    return;
+  }
+
+  const responseText = await response.text();
+  nodeRes.end(responseText);
+}

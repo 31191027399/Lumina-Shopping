@@ -1,12 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "npm install --prefix FE",
+  "installCommand": "npm install && npm install --prefix FE",
   "buildCommand": "npm run build --prefix FE",
   "outputDirectory": "FE/dist",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api(?:/|$)).*)",
       "destination": "/index.html"
     }
   ]

@@ -37,7 +37,7 @@ import {
 const DEFAULT_CATEGORIES = ["All"];
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? 'http://localhost:54321/functions/v1/api' : '');
+  (import.meta.env.DEV ? 'http://localhost:54321/functions/v1/api' : '/api');
 
 // --- Helper Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -211,7 +211,7 @@ const Footer = () => (
 
 // --- View Components ---
 
-const Home = ({ onNavigate }) => (
+const Home = ({ onNavigate, topCategories }) => (
   <div className="space-y-24">
     {/* Hero Section */}
     <section className="relative h-[85vh] flex items-center overflow-hidden">
@@ -255,17 +255,13 @@ const Home = ({ onNavigate }) => (
         </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {[
-          { name: 'Electronics', count: '24 Products', img: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=800&q=80' },
-          { name: 'Accessories', count: '18 Products', img: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=800&q=80' },
-          { name: 'Apparel', count: '32 Products', img: 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=800&q=80' }
-        ].map((cat, idx) => (
-          <div key={idx} className="group relative h-80 rounded-[2.5rem] overflow-hidden cursor-pointer shadow-xl transition-transform hover:-translate-y-2" onClick={() => onNavigate('shop')}>
+        {topCategories.map((cat) => (
+          <div key={cat.name} className="group relative h-80 rounded-[2.5rem] overflow-hidden cursor-pointer shadow-xl transition-transform hover:-translate-y-2" onClick={() => onNavigate('shop')}>
             <img src={cat.img} alt={cat.name} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
             <div className="absolute bottom-8 left-8 text-white">
               <h3 className="text-3xl font-black mb-1 leading-none">{cat.name}</h3>
-              <p className="text-sm font-medium opacity-80">{cat.count}</p>
+              <p className="text-sm font-medium opacity-80">{cat.count} Products</p>
             </div>
           </div>
         ))}
@@ -381,6 +377,8 @@ const AdminDashboard = ({
   onDeleteUser,
   onUpdateOrder,
   onDeleteOrder,
+  onDataClear,
+  onDataSeed,
   onNotify
 }) => {
   const [activeTab, setActiveTab] = useState('statistics');
@@ -397,6 +395,9 @@ const AdminDashboard = ({
   });
   const [createUserFeedback, setCreateUserFeedback] = useState({ type: '', text: '' });
   const [isMutating, setIsMutating] = useState(false);
+  const [dataControlLoading, setDataControlLoading] = useState(false);
+  const [dataControlTargets, setDataControlTargets] = useState(['catalog']);
+  const [seedCounts, setSeedCounts] = useState({ productCount: 8, userCount: 6, orderCount: 12 });
 
   // Statistics
   const stats = [
@@ -516,6 +517,25 @@ const AdminDashboard = ({
     }
   };
 
+  const runDataControl = async (type, payload) => {
+    if (!payload.targets?.length) {
+      onNotify?.('Please select at least one target.');
+      return;
+    }
+    setDataControlLoading(true);
+    try {
+      if (type === 'clear') {
+        await onDataClear(payload.targets);
+      } else {
+        await onDataSeed(payload);
+      }
+    } catch (err) {
+      onNotify?.(err.message || 'Data control action failed');
+    } finally {
+      setDataControlLoading(false);
+    }
+  };
+
   // Edit Handlers
   const handleSaveEdit = async (e) => {
     e.preventDefault();
@@ -566,6 +586,96 @@ const AdminDashboard = ({
                     </div>
                   ))}
                 </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50 space-y-4">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Control</h3>
+              <p className="text-sm text-gray-500">Testing-only tools to clear and reseed DB content.</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { id: 'orders', label: 'Orders' },
+                  { id: 'products', label: 'Products' },
+                  { id: 'catalog', label: 'Catalog' },
+                  { id: 'users', label: 'Non-Admin Users' }
+                ].map((target) => (
+                  <label
+                    key={target.id}
+                    className="flex items-center gap-2 text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-xl"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={dataControlTargets.includes(target.id)}
+                      onChange={(e) => {
+                        setDataControlTargets((prev) =>
+                          e.target.checked
+                            ? [...new Set([...prev, target.id])]
+                            : prev.filter((item) => item !== target.id)
+                        );
+                      }}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
+                    />
+                    {target.label}
+                  </label>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={seedCounts.productCount}
+                  onChange={(e) =>
+                    setSeedCounts((prev) => ({ ...prev, productCount: Number(e.target.value || 0) }))
+                  }
+                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                  placeholder="Products to seed"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={seedCounts.userCount}
+                  onChange={(e) =>
+                    setSeedCounts((prev) => ({ ...prev, userCount: Number(e.target.value || 0) }))
+                  }
+                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                  placeholder="Users to seed"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={seedCounts.orderCount}
+                  onChange={(e) =>
+                    setSeedCounts((prev) => ({ ...prev, orderCount: Number(e.target.value || 0) }))
+                  }
+                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                  placeholder="Orders to seed"
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  disabled={dataControlLoading}
+                  onClick={() => runDataControl('clear', { targets: dataControlTargets })}
+                  className="px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 disabled:opacity-40"
+                >
+                  Clear Selected
+                </button>
+                <button
+                  disabled={dataControlLoading}
+                  onClick={() =>
+                    runDataControl('seed', {
+                      targets: dataControlTargets,
+                      productCount: seedCounts.productCount,
+                      userCount: seedCounts.userCount,
+                      orderCount: seedCounts.orderCount
+                    })
+                  }
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  Seed Selected
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -888,6 +998,33 @@ export default function App() {
   const [userOrders, setUserOrders] = useState([]);
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('lumina_access_token') || '');
   const [toast, setToast] = useState(null);
+  const categoryImageMap = useMemo(
+    () => ({
+      Electronics: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=800&q=80',
+      Accessories: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=800&q=80',
+      Apparel: 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=800&q=80',
+      Fitness: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=80',
+      Home: 'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80'
+    }),
+    []
+  );
+  const topCategories = useMemo(() => {
+    const counts = products.reduce((acc, product) => {
+      acc[product.category] = (acc[product.category] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({
+        name,
+        count,
+        img:
+          categoryImageMap[name] ||
+          'https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=800&q=80'
+      }));
+  }, [products, categoryImageMap]);
 
   // Auto-hide toast
   useEffect(() => {
@@ -935,10 +1072,10 @@ export default function App() {
   };
 
   const fetchCatalogData = async () => {
-    const [productData, categoryData] = await Promise.all([
-      apiRequest('/products', { token: '' }),
-      apiRequest('/products/categories', { token: '' })
-    ]);
+      const [productData, categoryData] = await Promise.all([
+        apiRequest('/products', { token: '' }),
+        apiRequest('/products/categories', { token: '' })
+      ]);
     setProducts(productData.items || []);
     setCategories(categoryData.items?.length ? categoryData.items : DEFAULT_CATEGORIES);
   };
@@ -953,6 +1090,18 @@ export default function App() {
     if (!token) return;
     const data = await apiRequest('/orders', { token });
     setUserOrders(data.items || []);
+  };
+
+  const refreshAllData = async (token = authToken) => {
+    await fetchCatalogData();
+    if (token) {
+      await Promise.all([fetchCartData(token), fetchUserOrders(token)]);
+      if (user?.role === 'Admin') {
+        await fetchAdminData(token);
+      }
+    } else if (user?.role === 'Admin') {
+      await fetchAdminData(token);
+    }
   };
 
   useEffect(() => {
@@ -1105,6 +1254,23 @@ export default function App() {
     setOrders((prev) => prev.filter((item) => item.id !== orderId));
   };
 
+  const handleDataControlClear = async (targets) => {
+    await apiRequest('/admin/data-control/clear', { method: 'POST', body: { targets } });
+    await refreshAllData();
+    setToast(`Cleared: ${targets.join(', ')}`);
+  };
+
+  const handleDataControlSeed = async ({ targets, productCount, userCount, orderCount }) => {
+    const data = await apiRequest('/admin/data-control/seed', {
+      method: 'POST',
+      body: { targets, productCount, userCount, orderCount }
+    });
+    await refreshAllData();
+    setToast(
+      `Seeded ${data.insertedProducts ?? 0} products, ${data.insertedUsers ?? 0} users, ${data.insertedOrders ?? 0} orders`
+    );
+  };
+
   const handleOrderComplete = async () => {
     if (!authToken) {
       setToast('Please sign in to complete checkout');
@@ -1127,7 +1293,7 @@ export default function App() {
 
   const renderContent = () => {
     switch(currentPage) {
-      case 'home': return <Home onNavigate={navigateTo} />;
+      case 'home': return <Home onNavigate={navigateTo} topCategories={topCategories} />;
       case 'shop': return <Shop products={products} categories={categories} onAddToCart={addToCart} onProductClick={handleProductClick} />;
       case 'admin': return (
         <AdminDashboard
@@ -1139,6 +1305,8 @@ export default function App() {
           onDeleteUser={handleAdminUserDelete}
           onUpdateOrder={handleAdminOrderUpdate}
           onDeleteOrder={handleAdminOrderDelete}
+          onDataClear={handleDataControlClear}
+          onDataSeed={handleDataControlSeed}
           onNotify={setToast}
         />
       );
