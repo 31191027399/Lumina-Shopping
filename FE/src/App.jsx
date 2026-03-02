@@ -38,6 +38,12 @@ const DEFAULT_CATEGORIES = ["All"];
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV ? 'http://localhost:54321/functions/v1/api' : '/api');
+const FRONTEND_ORIGIN =
+  import.meta.env.VITE_FRONTEND_ORIGIN ||
+  (import.meta.env.DEV ? 'http://localhost:5173' : window.location.origin);
+const PASSWORD_RESET_REDIRECT_URL =
+  import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL ||
+  `${FRONTEND_ORIGIN}/?reset_password=1`;
 
 // --- Helper Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -680,10 +686,14 @@ const AdminDashboard = ({
     setIsMutating(true);
     try {
       if (editingItem.type === 'user') {
-        await onUpdateUser(editingItem.data.id, {
+        const payload = {
           role: editingItem.data.role,
           status: editingItem.data.status
-        });
+        };
+        if (editingItem.data.password) {
+          payload.password = editingItem.data.password;
+        }
+        await onUpdateUser(editingItem.data.id, payload);
       } else if (editingItem.type === 'order') {
         await onUpdateOrder(editingItem.data.id, { status: editingItem.data.status });
       } else {
@@ -757,7 +767,7 @@ const AdminDashboard = ({
             </div>
 
             <div className="px-8 py-7 space-y-5">
-              <div className="hidden md:grid grid-cols-[1.6fr_1fr_180px] px-4 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+              <div className="hidden md:grid md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,160px)] px-4 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() =>
@@ -779,11 +789,11 @@ const AdminDashboard = ({
                   return (
                     <div
                       key={target.id}
-                      className={`grid grid-cols-1 md:grid-cols-[1.6fr_1fr_180px] items-center gap-4 px-5 py-4 rounded-2xl border transition-colors ${
+                      className={`grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,160px)] items-center gap-4 px-5 py-4 rounded-2xl border transition-colors ${
                         selected ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-slate-100/80'
                       }`}
                     >
-                      <label className="flex items-center gap-4">
+                      <label className="flex items-center gap-4 min-w-0">
                         <input
                           type="checkbox"
                           checked={selected}
@@ -797,8 +807,7 @@ const AdminDashboard = ({
                           className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 w-6 h-6"
                         />
                         <span className="text-xl">{target.icon}</span>
-                        <span className={`text-2xl leading-none md:text-[2rem] md:leading-none font-black tracking-tight ${selected ? 'text-slate-900' : 'text-slate-500'} hidden`}>{target.label}</span>
-                        <span className={`text-sm md:text-2xl font-black tracking-tight ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{target.label}</span>
+                        <span className={`text-sm md:text-xl font-black tracking-tight truncate ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{target.label}</span>
                       </label>
 
                       <div className="justify-self-start md:justify-self-end flex items-center gap-2">
@@ -933,7 +942,7 @@ const AdminDashboard = ({
                         </div>
                       </td>
                       <td className="px-8 py-6 text-right space-x-4">
-                        <button onClick={() => setEditingItem({ type: 'user', data: user })} className="text-gray-400 hover:text-indigo-600"><Edit size={16} /></button>
+                        <button onClick={() => setEditingItem({ type: 'user', data: { ...user, password: '' } })} className="text-gray-400 hover:text-indigo-600"><Edit size={16} /></button>
                         <button disabled={isMutating} onClick={() => deleteSingleUser(user.id)} className="text-gray-400 hover:text-rose-500 disabled:opacity-40"><Trash2 size={16} /></button>
                       </td>
                     </tr>
@@ -1165,6 +1174,19 @@ const AdminDashboard = ({
                   <option>Inactive</option>
                 </select>
               </div>
+              {editingItem?.data.role === 'Customer' && (
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">New Password (Customer)</label>
+                  <input
+                    type="password"
+                    minLength={6}
+                    placeholder="Leave blank to keep current password"
+                    className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                    value={editingItem?.data.password || ''}
+                    onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, password: e.target.value }})}
+                  />
+                </div>
+              )}
             </>
           ) : editingItem?.type === 'order' ? (
             <div>
@@ -1688,13 +1710,21 @@ export default function App() {
       throw new Error('Email is required');
     }
 
-    const redirectTo = `${window.location.origin}${window.location.pathname}?reset_password=1`;
+    const redirectTo = PASSWORD_RESET_REDIRECT_URL;
     await apiRequest('/auth/password-reset', {
       method: 'POST',
       body: { email: normalizedEmail, redirectTo },
       token: ''
     });
     setToast('If the account exists, a reset email has been sent');
+  };
+
+  const handleProfilePasswordChange = async ({ oldPassword, newPassword }) => {
+    await apiRequest('/auth/password-change', {
+      method: 'POST',
+      body: { oldPassword, newPassword }
+    });
+    setToast('Password updated');
   };
 
   const handlePasswordResetConfirm = async ({ accessToken, refreshToken, password }) => {
@@ -1848,7 +1878,7 @@ export default function App() {
           user={user}
           orders={userOrders}
           onLogout={handleLogout}
-          onRequestPasswordReset={handlePasswordResetRequest}
+          onChangePassword={handleProfilePasswordChange}
         />
       );
       case 'checkout': return <Checkout cart={cart} onComplete={handleOrderComplete} onNavigate={navigateTo} />;
@@ -1958,23 +1988,43 @@ const Cart = ({ cart, onUpdateQty, onRemove, onCheckout, onNavigate }) => {
   );
 };
 
-const Profile = ({ user, orders, onLogout, onRequestPasswordReset }) => {
-  const [isResetting, setIsResetting] = useState(false);
-  const [resetMessage, setResetMessage] = useState('');
-  const [resetError, setResetError] = useState('');
+const Profile = ({ user, orders, onLogout, onChangePassword }) => {
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
-  const handlePasswordReset = async () => {
-    if (!onRequestPasswordReset) return;
-    setResetMessage('');
-    setResetError('');
-    setIsResetting(true);
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setPasswordMessage('');
+    setPasswordError('');
+
+    if (!oldPassword || !newPassword) {
+      setPasswordError('Old password and new password are required.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New password and confirmation do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
     try {
-      await onRequestPasswordReset(user?.email || '');
-      setResetMessage('Password reset email sent. Please check your inbox.');
+      await onChangePassword({ oldPassword, newPassword });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordMessage('Password updated successfully.');
     } catch (err) {
-      setResetError(err.message || 'Failed to send reset email');
+      setPasswordError(err.message || 'Failed to update password');
     } finally {
-      setIsResetting(false);
+      setIsChangingPassword(false);
     }
   };
 
@@ -2002,16 +2052,39 @@ const Profile = ({ user, orders, onLogout, onRequestPasswordReset }) => {
             </div>
             <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner space-y-3">
               <h3 className="text-xl font-bold">Settings</h3>
-              <p className="text-sm text-gray-400">Manage account</p>
-              <button
-                onClick={handlePasswordReset}
-                disabled={isResetting}
-                className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
-              >
-                {isResetting ? 'Sending...' : 'Reset Password via Email'}
-              </button>
-              {resetMessage && <p className="text-xs font-bold text-emerald-600">{resetMessage}</p>}
-              {resetError && <p className="text-xs font-bold text-rose-500">{resetError}</p>}
+              <p className="text-sm text-gray-400">Change your password</p>
+              <form onSubmit={handlePasswordChange} className="space-y-3">
+                <input
+                  type="password"
+                  placeholder="Old password"
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                />
+                <input
+                  type="password"
+                  placeholder="New password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                />
+                <input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={isChangingPassword}
+                  className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  {isChangingPassword ? 'Updating...' : 'Update Password'}
+                </button>
+              </form>
+              {passwordMessage && <p className="text-xs font-bold text-emerald-600">{passwordMessage}</p>}
+              {passwordError && <p className="text-xs font-bold text-rose-500">{passwordError}</p>}
             </div>
           </div>
         </div>
@@ -2021,14 +2094,14 @@ const Profile = ({ user, orders, onLogout, onRequestPasswordReset }) => {
 };
 
 const Login = ({ onLoginSuccess, onNavigate, onRequestPasswordReset }) => {
+  const [view, setView] = useState('login'); // 'login' | 'forgot-password' | 'success'
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
   const [isLoading, setIsLoading] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
+  const [isResetLoading, setIsResetLoading] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
-  const [resetMessage, setResetMessage] = useState('');
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
@@ -2046,48 +2119,162 @@ const Login = ({ onLoginSuccess, onNavigate, onRequestPasswordReset }) => {
     }
   };
 
-  const handleForgotPassword = async () => {
+  const handleResetRequest = async (e) => {
+    e.preventDefault();
     const email = String(formData.email || '').trim();
     if (!email) {
       setError('Enter your email first to reset password');
       return;
     }
+
     setError('');
-    setResetMessage('');
-    setIsResetting(true);
+    setIsResetLoading(true);
     try {
       await onRequestPasswordReset(email);
-      setResetMessage('Password reset email sent. Please check your inbox.');
+      setView('success');
     } catch (err) {
       setError(err.message || 'Failed to send reset email');
     } finally {
-      setIsResetting(false);
+      setIsResetLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center py-24 px-4 bg-gray-50/50">
-      <div className="max-w-md w-full bg-white rounded-[3rem] shadow-2xl p-12 animate-in slide-in-from-top-4">
-        <h2 className="text-4xl font-black text-gray-900 mb-8">{isLogin ? 'Login' : 'Join'}</h2>
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          {!isLogin && <input type="text" placeholder="Name" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, name: e.target.value})} />}
-          <input type="email" placeholder="email@example.com" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, email: e.target.value})} />
-          <input type="password" placeholder="••••••••" className="w-full px-6 py-4 rounded-2xl bg-gray-50 outline-none" onChange={e => setFormData({...formData, password: e.target.value})} />
-          {isLogin && (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-[440px] bg-white rounded-[48px] shadow-2xl shadow-slate-200/50 p-10 md:p-14 border border-slate-50 relative overflow-hidden">
+        {view === 'login' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h1 className="text-4xl font-extrabold text-slate-900 mb-10 tracking-tight">
+              {isLogin ? 'Login' : 'Join'}
+            </h1>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              {!isLogin && (
+                <input
+                  type="text"
+                  placeholder="Name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full bg-slate-50 border-none rounded-2xl px-6 py-5 text-lg outline-none"
+                />
+              )}
+              <input
+                type="email"
+                placeholder="email@example.com"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full bg-slate-50 border-none rounded-2xl px-6 py-5 text-lg outline-none placeholder:text-slate-300"
+              />
+              <input
+                type="password"
+                placeholder="........"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                className="w-full bg-slate-50 border-none rounded-2xl px-6 py-5 text-lg outline-none placeholder:text-slate-300 tracking-widest"
+              />
+
+              {isLogin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setView('forgot-password');
+                  }}
+                  className="block text-[11px] font-black text-indigo-600 tracking-widest uppercase hover:text-indigo-700 transition-colors pt-2"
+                >
+                  Forgot Password? Send Reset Email
+                </button>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-[#0F172A] text-white font-bold py-5 rounded-2xl text-sm tracking-widest uppercase mt-6 hover:bg-slate-800 transition-all disabled:opacity-70"
+              >
+                {isLoading ? 'Please wait...' : isLogin ? 'Sign In' : 'Join'}
+              </button>
+
+              {error && (
+                <div className="flex items-center gap-2 mt-4">
+                  <span className="text-rose-500 text-sm font-semibold">{error}</span>
+                </div>
+              )}
+            </form>
+
+            <div className="mt-12 text-center">
+              <p className="text-[11px] font-bold text-slate-400 tracking-widest uppercase">
+                {isLogin ? 'New?' : 'Member?'}{' '}
+                <button
+                  onClick={() => {
+                    setError('');
+                    setIsLogin(!isLogin);
+                  }}
+                  className="text-indigo-600 underline underline-offset-4 decoration-2"
+                >
+                  Switch
+                </button>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {view === 'forgot-password' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={isResetting}
-              className="text-xs font-black uppercase tracking-widest text-indigo-600 hover:underline disabled:opacity-40"
+              onClick={() => {
+                setError('');
+                setView('login');
+              }}
+              className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors mb-6 group"
             >
-              {isResetting ? 'Sending reset email...' : 'Forgot password? Send reset email'}
+              <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
+              <span className="text-xs font-bold uppercase tracking-widest">Back</span>
             </button>
-          )}
-          <button disabled={isLoading} className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs">{isLoading ? 'Wait...' : (isLogin ? 'Sign In' : 'Join')}</button>
-        </form>
-        {error && <p className="text-xs text-rose-500 font-bold mt-4">{error}</p>}
-        {resetMessage && <p className="text-xs text-emerald-600 font-bold mt-4">{resetMessage}</p>}
-        <p className="text-xs font-black text-center mt-12 text-gray-400 uppercase tracking-widest">{isLogin ? 'New?' : 'Member?'} <button onClick={() => setIsLogin(!isLogin)} className="text-indigo-600 underline">Switch</button></p>
+
+            <h1 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">Reset</h1>
+            <p className="text-slate-500 text-sm mb-10 leading-relaxed">
+              Enter your email address and we&apos;ll send you a secure link to reset your password.
+            </p>
+
+            <form onSubmit={handleResetRequest} className="space-y-6">
+              <input
+                type="email"
+                placeholder="email@example.com"
+                required
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full bg-slate-50 border-none rounded-2xl px-6 py-5 text-lg outline-none placeholder:text-slate-300"
+              />
+
+              <button
+                type="submit"
+                disabled={isResetLoading}
+                className="w-full bg-[#0F172A] text-white font-bold py-5 rounded-2xl text-sm tracking-widest uppercase hover:bg-slate-800 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {isResetLoading ? 'Sending...' : 'Send Reset Link'}
+              </button>
+            </form>
+            {error && <p className="text-xs text-rose-500 font-bold mt-4">{error}</p>}
+          </div>
+        )}
+
+        {view === 'success' && (
+          <div className="text-center py-8 animate-in zoom-in duration-500">
+            <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-100">
+              <CheckCircle size={40} className="text-emerald-500" />
+            </div>
+            <h2 className="text-2xl font-extrabold text-slate-900 mb-4">Email Sent!</h2>
+            <p className="text-slate-500 text-sm mb-10 px-4">
+              Check your inbox for <b>{formData.email}</b>. We&apos;ve sent a link to reset your password.
+            </p>
+            <button
+              onClick={() => setView('login')}
+              className="w-full bg-slate-50 text-slate-900 font-bold py-5 rounded-2xl text-sm tracking-widest uppercase hover:bg-slate-100 transition-all"
+            >
+              Return to Login
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

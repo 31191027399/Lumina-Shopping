@@ -630,6 +630,40 @@ async function handleRequest(req: Request) {
       });
     }
 
+    if (path === '/auth/password-change' && req.method === 'POST') {
+      const user = await getUserFromAuth(req);
+      const body = await readJson(req);
+      const oldPassword = String(body.oldPassword || '');
+      const newPassword = String(body.newPassword || '');
+
+      if (!oldPassword || !newPassword) {
+        return response(400, { error: 'oldPassword and newPassword are required' });
+      }
+      if (newPassword.length < 6) {
+        return response(400, { error: 'New password must be at least 6 characters' });
+      }
+      if (oldPassword === newPassword) {
+        return response(400, { error: 'New password must be different from old password' });
+      }
+
+      const { error: verifyError } = await authClient.auth.signInWithPassword({
+        email: user.email,
+        password: oldPassword
+      });
+      if (verifyError) {
+        return response(401, { error: 'Old password is incorrect' });
+      }
+
+      const { error: updateError } = await adminClient.auth.admin.updateUserById(user.id, {
+        password: newPassword
+      });
+      if (updateError) {
+        return response(400, { error: updateError.message });
+      }
+
+      return response(200, { ok: true });
+    }
+
     if (path === '/auth/password-reset/confirm' && req.method === 'POST') {
       const body = await readJson(req);
       const accessToken = String(body.accessToken || '').trim();
@@ -915,7 +949,48 @@ async function handleRequest(req: Request) {
         updates.name = String(body.name);
       }
 
+      const password = body.password ? String(body.password) : '';
+      if (password) {
+        if (password.length < 6) {
+          return response(400, { error: 'Password must be at least 6 characters' });
+        }
+        const { data: targetProfile, error: profileLookupError } = await adminClient
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (profileLookupError) throw profileLookupError;
+        if (!targetProfile) return response(404, { error: 'User not found' });
+        if (targetProfile.role !== 'Customer') {
+          return response(400, { error: 'Password update is only allowed for customer accounts' });
+        }
+
+        const { error: passwordError } = await adminClient.auth.admin.updateUserById(userId, { password });
+        if (passwordError) {
+          return response(400, { error: passwordError.message });
+        }
+      }
+
       if (Object.keys(updates).length === 0) {
+        if (password) {
+          const { data } = await adminClient
+            .from('profiles')
+            .select('id,name,email,role,status,created_at')
+            .eq('id', userId)
+            .maybeSingle();
+          if (!data) return response(404, { error: 'User not found' });
+          return response(200, {
+            user: {
+              id: data.id,
+              name: data.name,
+              email: data.email,
+              role: data.role,
+              status: data.status,
+              joined: formatShortDate(data.created_at)
+            }
+          });
+        }
         return response(400, { error: 'No valid fields to update' });
       }
 
