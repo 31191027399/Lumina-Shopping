@@ -34,40 +34,16 @@ import {
   Save
 } from 'lucide-react';
 
-// --- Initial Mock Data ---
-const INITIAL_PRODUCTS = [
-  { id: 1, name: "Premium Wireless Headphones", price: 299.99, category: "Electronics", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&q=80", rating: 4.8, reviews: 124, description: "Experience studio-quality sound with our flagship wireless headphones featuring active noise cancellation." },
-  { id: 2, name: "Minimalist Leather Watch", price: 149.00, category: "Accessories", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80", rating: 4.6, reviews: 89, description: "A timeless design that complements any outfit. Crafted with genuine Italian leather." },
-  { id: 3, name: "Smart Fitness Tracker", price: 89.99, category: "Electronics", image: "https://images.unsplash.com/photo-1575311373937-040b8e1fd5b6?w=800&q=80", rating: 4.5, reviews: 210, description: "Track your steps, heart rate, and sleep quality with 24/7 precision." },
-  { id: 4, name: "Eco-Friendly Yoga Mat", price: 55.00, category: "Fitness", image: "https://images.unsplash.com/photo-1592432676556-28453d078add?w=800&q=80", rating: 4.9, reviews: 56, description: "Non-slip surface made from sustainable natural rubber for the perfect flow." },
-  { id: 5, name: "Ceramic Coffee Set", price: 45.00, category: "Home", image: "https://images.unsplash.com/photo-1517254456976-ee8682099819?w=800&q=80", rating: 4.7, reviews: 42, description: "Hand-crafted ceramic set including two mugs and a matching pour-over dripper." },
-  { id: 6, name: "Canvas Weekend Bag", price: 120.00, category: "Accessories", image: "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=800&q=80", rating: 4.4, reviews: 33, description: "Durable water-resistant canvas with leather accents. Perfect for short getaways." },
-  { id: 7, name: "Mechanical Gaming Keyboard", price: 175.00, category: "Electronics", image: "https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?w=800&q=80", rating: 4.8, reviews: 156, description: "Tactile switches and customizable RGB lighting for the ultimate gaming experience." },
-  { id: 8, name: "Organic Cotton Hoodie", price: 65.00, category: "Apparel", image: "https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=800&q=80", rating: 4.6, reviews: 92, description: "Ultra-soft sustainable cotton blend. Designed for comfort and durability." },
-];
-
-const INITIAL_USERS = [
-  { id: 1, name: "Alex Johnson", email: "admin@example.com", role: "Admin", status: "Active", joined: "Jan 12, 2024" },
-  { id: 2, name: "Sarah Smith", email: "sarah.s@outlook.com", role: "Customer", status: "Active", joined: "Feb 05, 2024" },
-  { id: 3, name: "Michael Chen", email: "mchen@gmail.com", role: "Customer", status: "Inactive", joined: "Dec 20, 2023" },
-  { id: 4, name: "Emily Davis", email: "emily.d@lumina.com", role: "Manager", status: "Active", joined: "Mar 01, 2024" },
-];
-
-const INITIAL_ORDERS = [
-  { id: "#ORD-7742", customer: "Sarah Smith", date: "Mar 10, 2024", total: 448.99, status: "Delivered" },
-  { id: "#ORD-7741", customer: "Alex Johnson", date: "Mar 09, 2024", total: 175.00, status: "Shipped" },
-  { id: "#ORD-7740", customer: "David Brown", date: "Mar 08, 2024", total: 1290.50, status: "Processing" },
-  { id: "#ORD-7739", customer: "Jessica Lee", date: "Mar 07, 2024", total: 55.00, status: "Cancelled" },
-];
-
-const CATEGORIES = ["All", "Electronics", "Accessories", "Fitness", "Home", "Apparel"];
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:54321/functions/v1/api';
+const DEFAULT_CATEGORIES = ["All"];
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? 'http://localhost:54321/functions/v1/api' : '');
 
 // --- Helper Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white rounded-[2.5rem] w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
         <div className="p-8 border-b border-gray-100 flex justify-between items-center">
           <h3 className="text-xl font-black text-gray-900 tracking-tight uppercase tracking-widest text-xs">{title}</h3>
@@ -298,7 +274,7 @@ const Home = ({ onNavigate }) => (
   </div>
 );
 
-const Shop = ({ onAddToCart, onProductClick, products }) => {
+const Shop = ({ onAddToCart, onProductClick, products, categories }) => {
   const [activeCategory, setActiveCategory] = useState("All");
   const [sortBy, setSortBy] = useState("featured");
 
@@ -342,7 +318,7 @@ const Shop = ({ onAddToCart, onProductClick, products }) => {
       </div>
 
       <div className="flex gap-3 mb-12 overflow-x-auto pb-4 scrollbar-hide">
-        {CATEGORIES.map(cat => (
+        {categories.map(cat => (
           <button
             key={cat}
             onClick={() => setActiveCategory(cat)}
@@ -902,12 +878,14 @@ const AdminDashboard = ({
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home');
-  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState([]);
   const [user, setUser] = useState(null);
+  const [userOrders, setUserOrders] = useState([]);
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('lumina_access_token') || '');
   const [toast, setToast] = useState(null);
 
@@ -920,6 +898,9 @@ export default function App() {
   }, [toast]);
 
   const apiRequest = async (path, options = {}) => {
+    if (!API_BASE_URL) {
+      throw new Error('Missing VITE_API_BASE_URL for this environment.');
+    }
     const { method = 'GET', body, token = authToken } = options;
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method,
@@ -953,12 +934,39 @@ export default function App() {
     setOrders(ordersData.items || []);
   };
 
+  const fetchCatalogData = async () => {
+    const [productData, categoryData] = await Promise.all([
+      apiRequest('/products', { token: '' }),
+      apiRequest('/products/categories', { token: '' })
+    ]);
+    setProducts(productData.items || []);
+    setCategories(categoryData.items?.length ? categoryData.items : DEFAULT_CATEGORIES);
+  };
+
+  const fetchCartData = async (token = authToken) => {
+    if (!token) return;
+    const data = await apiRequest('/cart', { token });
+    setCart(data.items || []);
+  };
+
+  const fetchUserOrders = async (token = authToken) => {
+    if (!token) return;
+    const data = await apiRequest('/orders', { token });
+    setUserOrders(data.items || []);
+  };
+
   useEffect(() => {
     const bootstrapUser = async () => {
+      try {
+        await fetchCatalogData();
+      } catch (err) {
+        setToast(err.message || 'Failed to load catalog');
+      }
       if (!authToken) return;
       try {
         const me = await apiRequest('/auth/me', { token: authToken });
         setUser(me.user);
+        await Promise.all([fetchCartData(authToken), fetchUserOrders(authToken)]);
       } catch (_err) {
         localStorage.removeItem('lumina_access_token');
         setAuthToken('');
@@ -975,27 +983,45 @@ export default function App() {
     }
   }, [currentPage, user?.role, authToken]);
 
-  const addToCart = (product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => item.id === product.id 
-          ? { ...item, quantity: item.quantity + 1 } 
-          : item
-        );
-      }
-      return [...prev, { ...product, quantity: 1 }];
-    });
-    setToast(`${product.name} added to cart`);
+  const addToCart = async (product) => {
+    if (!authToken) {
+      setToast('Please sign in to add products to cart');
+      navigateTo('login');
+      return;
+    }
+    try {
+      const data = await apiRequest('/cart/items', {
+        method: 'POST',
+        body: { productId: product.id, quantity: 1 }
+      });
+      setCart(data.items || []);
+      setToast(`${product.name} added to cart`);
+    } catch (err) {
+      setToast(err.message || 'Failed to add item');
+    }
   };
 
-  const updateCartQty = (id, qty) => {
-    if (qty < 1) return;
-    setCart(prev => prev.map(item => item.id === id ? { ...item, quantity: qty } : item));
+  const updateCartQty = async (id, qty) => {
+    if (qty < 1 || !authToken) return;
+    try {
+      const data = await apiRequest(`/cart/items/${id}`, {
+        method: 'PATCH',
+        body: { quantity: qty }
+      });
+      setCart(data.items || []);
+    } catch (err) {
+      setToast(err.message || 'Failed to update item quantity');
+    }
   };
 
-  const removeFromCart = (id) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+  const removeFromCart = async (id) => {
+    if (!authToken) return;
+    try {
+      const data = await apiRequest(`/cart/items/${id}`, { method: 'DELETE' });
+      setCart(data.items || []);
+    } catch (err) {
+      setToast(err.message || 'Failed to remove item');
+    }
   };
 
   const navigateTo = (page) => {
@@ -1021,6 +1047,8 @@ export default function App() {
     setUser(null);
     setUsers([]);
     setOrders([]);
+    setUserOrders([]);
+    setCart([]);
     navigateTo('home');
   };
 
@@ -1043,6 +1071,7 @@ export default function App() {
     localStorage.setItem('lumina_access_token', token);
     setAuthToken(token);
     setUser(data.user);
+    await Promise.all([fetchCartData(token), fetchUserOrders(token)]);
     setToast(isLogin ? 'Logged in successfully' : 'Account created');
     navigateTo('home');
   };
@@ -1084,16 +1113,8 @@ export default function App() {
     }
 
     try {
-      await apiRequest('/cart', { method: 'DELETE' });
-      for (const item of cart) {
-        await apiRequest('/cart/items', {
-          method: 'POST',
-          body: { productId: item.id, quantity: item.quantity }
-        });
-      }
-
       await apiRequest('/orders/checkout', { method: 'POST', body: { paymentMethod: 'card' } });
-      setCart([]);
+      await Promise.all([fetchCartData(), fetchUserOrders()]);
       setToast('Order placed successfully');
       if (user?.role === 'Admin') {
         await fetchAdminData();
@@ -1107,7 +1128,7 @@ export default function App() {
   const renderContent = () => {
     switch(currentPage) {
       case 'home': return <Home onNavigate={navigateTo} />;
-      case 'shop': return <Shop products={products} onAddToCart={addToCart} onProductClick={handleProductClick} />;
+      case 'shop': return <Shop products={products} categories={categories} onAddToCart={addToCart} onProductClick={handleProductClick} />;
       case 'admin': return (
         <AdminDashboard
           users={users}
@@ -1136,7 +1157,7 @@ export default function App() {
           onNavigate={navigateTo} 
         />
       );
-      case 'profile': return <Profile user={user} onLogout={handleLogout} />;
+      case 'profile': return <Profile user={user} orders={userOrders} onLogout={handleLogout} />;
       case 'checkout': return <Checkout cart={cart} onComplete={handleOrderComplete} onNavigate={navigateTo} />;
       case 'success': return <Success onNavigate={navigateTo} />;
       case 'productDetail': return selectedProduct ? (
@@ -1164,7 +1185,7 @@ export default function App() {
             </div>
           </div>
         </div>
-      ) : <Shop products={products} onAddToCart={addToCart} onProductClick={handleProductClick} />;
+      ) : <Shop products={products} categories={categories} onAddToCart={addToCart} onProductClick={handleProductClick} />;
       default: return <Home onNavigate={navigateTo} />;
     }
   };
@@ -1244,7 +1265,7 @@ const Cart = ({ cart, onUpdateQty, onRemove, onCheckout, onNavigate }) => {
   );
 };
 
-const Profile = ({ user, onLogout }) => (
+const Profile = ({ user, orders, onLogout }) => (
   <div className="max-w-4xl mx-auto px-4 py-16 animate-in slide-in-from-bottom-8">
     <div className="bg-white rounded-[3rem] border-2 border-gray-50 shadow-2xl overflow-hidden">
       <div className="bg-gradient-to-r from-indigo-600 to-violet-600 h-48 relative">
@@ -1260,7 +1281,12 @@ const Profile = ({ user, onLogout }) => (
           <button onClick={onLogout} className="px-6 py-3 bg-red-50 rounded-2xl font-bold text-red-600 hover:bg-red-100 flex items-center gap-2"><LogOut size={18} /> Sign Out</button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner"><h3 className="text-xl font-bold mb-4">Orders</h3><p className="text-sm text-gray-400">View history</p></div>
+          <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner">
+            <h3 className="text-xl font-bold mb-4">Orders</h3>
+            <p className="text-sm text-gray-400">
+              {orders?.length ? `${orders.length} order(s) in history` : 'No orders yet'}
+            </p>
+          </div>
           <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner"><h3 className="text-xl font-bold mb-4">Settings</h3><p className="text-sm text-gray-400">Manage account</p></div>
         </div>
       </div>
