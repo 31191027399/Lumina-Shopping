@@ -369,6 +369,7 @@ const Shop = ({ onAddToCart, onProductClick, products, categories }) => {
 };
 
 const AdminDashboard = ({
+  products,
   users,
   orders,
   currentUserId,
@@ -377,6 +378,9 @@ const AdminDashboard = ({
   onDeleteUser,
   onUpdateOrder,
   onDeleteOrder,
+  onCreateProduct,
+  onUpdateProduct,
+  onDeleteProduct,
   onDataClear,
   onDataSeed,
   onNotify
@@ -384,8 +388,10 @@ const AdminDashboard = ({
   const [activeTab, setActiveTab] = useState('statistics');
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [selectedOrders, setSelectedOrders] = useState([]);
-  const [editingItem, setEditingItem] = useState(null); // { type: 'user' | 'order', data: object }
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [editingItem, setEditingItem] = useState(null); // { type: 'user' | 'order' | 'product', data: object }
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
   const [newUserForm, setNewUserForm] = useState({
     name: '',
     email: '',
@@ -393,7 +399,17 @@ const AdminDashboard = ({
     role: 'Customer',
     status: 'Active'
   });
+  const [newProductForm, setNewProductForm] = useState({
+    name: '',
+    category: '',
+    price: 0,
+    image: '',
+    rating: 4.5,
+    reviews: 0,
+    description: ''
+  });
   const [createUserFeedback, setCreateUserFeedback] = useState({ type: '', text: '' });
+  const [createProductFeedback, setCreateProductFeedback] = useState({ type: '', text: '' });
   const [isMutating, setIsMutating] = useState(false);
   const [dataControlLoading, setDataControlLoading] = useState(false);
   const [dataControlTargets, setDataControlTargets] = useState(['catalog']);
@@ -465,6 +481,23 @@ const AdminDashboard = ({
       setIsMutating(false);
     }
   };
+  const toggleProductSelection = (id) => {
+    setSelectedProducts(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]);
+  };
+  const toggleAllProducts = () => {
+    setSelectedProducts(prev => prev.length === products.length ? [] : products.map(p => p.id));
+  };
+  const deleteSelectedProducts = async () => {
+    setIsMutating(true);
+    try {
+      await Promise.all(selectedProducts.map((id) => onDeleteProduct(id)));
+      setSelectedProducts([]);
+    } catch (err) {
+      onNotify?.(err.message || 'Failed to delete selected products');
+    } finally {
+      setIsMutating(false);
+    }
+  };
 
   const deleteSingleUser = async (id) => {
     if (id === currentUserId) {
@@ -493,6 +526,17 @@ const AdminDashboard = ({
       setIsMutating(false);
     }
   };
+  const deleteSingleProduct = async (id) => {
+    setIsMutating(true);
+    try {
+      await onDeleteProduct(id);
+      setSelectedProducts((prev) => prev.filter((productId) => productId !== id));
+    } catch (err) {
+      onNotify?.(err.message || 'Failed to delete product');
+    } finally {
+      setIsMutating(false);
+    }
+  };
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -511,6 +555,35 @@ const AdminDashboard = ({
     } catch (err) {
       const message = err.message || 'Failed to create user';
       setCreateUserFeedback({ type: 'error', text: message });
+      onNotify?.(message);
+    } finally {
+      setIsMutating(false);
+    }
+  };
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    setCreateProductFeedback({ type: '', text: '' });
+    setIsMutating(true);
+    try {
+      await onCreateProduct({
+        ...newProductForm,
+        price: Number(newProductForm.price || 0),
+        rating: Number(newProductForm.rating || 0),
+        reviews: Number(newProductForm.reviews || 0)
+      });
+      setCreateProductFeedback({ type: 'success', text: 'Product created successfully.' });
+      setNewProductForm({
+        name: '',
+        category: '',
+        price: 0,
+        image: '',
+        rating: 4.5,
+        reviews: 0,
+        description: ''
+      });
+    } catch (err) {
+      const message = err.message || 'Failed to create product';
+      setCreateProductFeedback({ type: 'error', text: message });
       onNotify?.(message);
     } finally {
       setIsMutating(false);
@@ -547,8 +620,18 @@ const AdminDashboard = ({
           role: editingItem.data.role,
           status: editingItem.data.status
         });
-      } else {
+      } else if (editingItem.type === 'order') {
         await onUpdateOrder(editingItem.data.id, { status: editingItem.data.status });
+      } else {
+        await onUpdateProduct(editingItem.data.id, {
+          name: editingItem.data.name,
+          category: editingItem.data.category,
+          price: Number(editingItem.data.price || 0),
+          image: editingItem.data.image,
+          rating: Number(editingItem.data.rating || 0),
+          reviews: Number(editingItem.data.reviews || 0),
+          description: editingItem.data.description
+        });
       }
       setEditingItem(null);
     } catch (err) {
@@ -589,8 +672,8 @@ const AdminDashboard = ({
             </div>
 
             <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50 space-y-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Control</h3>
-              <p className="text-sm text-gray-500">Testing-only tools to clear and reseed DB content.</p>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Clear</h3>
+              <p className="text-sm text-gray-500">Testing-only tool to clear selected DB content.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { id: 'orders', label: 'Orders' },
@@ -618,41 +701,6 @@ const AdminDashboard = ({
                   </label>
                 ))}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={seedCounts.productCount}
-                  onChange={(e) =>
-                    setSeedCounts((prev) => ({ ...prev, productCount: Number(e.target.value || 0) }))
-                  }
-                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                  placeholder="Products to seed"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={seedCounts.userCount}
-                  onChange={(e) =>
-                    setSeedCounts((prev) => ({ ...prev, userCount: Number(e.target.value || 0) }))
-                  }
-                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                  placeholder="Users to seed"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={200}
-                  value={seedCounts.orderCount}
-                  onChange={(e) =>
-                    setSeedCounts((prev) => ({ ...prev, orderCount: Number(e.target.value || 0) }))
-                  }
-                  className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
-                  placeholder="Orders to seed"
-                />
-              </div>
               <div className="flex flex-wrap gap-3">
                 <button
                   disabled={dataControlLoading}
@@ -661,21 +709,92 @@ const AdminDashboard = ({
                 >
                   Clear Selected
                 </button>
-                <button
-                  disabled={dataControlLoading}
-                  onClick={() =>
-                    runDataControl('seed', {
-                      targets: dataControlTargets,
-                      productCount: seedCounts.productCount,
-                      userCount: seedCounts.userCount,
-                      orderCount: seedCounts.orderCount
-                    })
-                  }
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
-                >
-                  Seed Selected
-                </button>
               </div>
+            </div>
+          </div>
+        );
+      case 'seeding':
+        return (
+          <div className="bg-white p-8 rounded-[2.5rem] border-2 border-gray-50 space-y-4 animate-in fade-in duration-500">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data Seeding</h3>
+            <p className="text-sm text-gray-500">Seed selected datasets with controlled record volumes.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { id: 'orders', label: 'Orders' },
+                { id: 'products', label: 'Products' },
+                { id: 'catalog', label: 'Catalog' },
+                { id: 'users', label: 'Non-Admin Users' }
+              ].map((target) => (
+                <label
+                  key={target.id}
+                  className="flex items-center gap-2 text-xs font-bold text-gray-600 bg-gray-50 px-3 py-2 rounded-xl"
+                >
+                  <input
+                    type="checkbox"
+                    checked={dataControlTargets.includes(target.id)}
+                    onChange={(e) => {
+                      setDataControlTargets((prev) =>
+                        e.target.checked
+                          ? [...new Set([...prev, target.id])]
+                          : prev.filter((item) => item !== target.id)
+                      );
+                    }}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
+                  />
+                  {target.label}
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={seedCounts.productCount}
+                onChange={(e) =>
+                  setSeedCounts((prev) => ({ ...prev, productCount: Number(e.target.value || 0) }))
+                }
+                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                placeholder="Products to seed"
+              />
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={seedCounts.userCount}
+                onChange={(e) =>
+                  setSeedCounts((prev) => ({ ...prev, userCount: Number(e.target.value || 0) }))
+                }
+                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                placeholder="Users to seed"
+              />
+              <input
+                type="number"
+                min={0}
+                max={200}
+                value={seedCounts.orderCount}
+                onChange={(e) =>
+                  setSeedCounts((prev) => ({ ...prev, orderCount: Number(e.target.value || 0) }))
+                }
+                className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold outline-none"
+                placeholder="Orders to seed"
+              />
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                disabled={dataControlLoading}
+                onClick={() =>
+                  runDataControl('seed', {
+                    targets: dataControlTargets,
+                    productCount: seedCounts.productCount,
+                    userCount: seedCounts.userCount,
+                    orderCount: seedCounts.orderCount
+                  })
+                }
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+              >
+                Seed Selected
+              </button>
             </div>
           </div>
         );
@@ -818,6 +937,96 @@ const AdminDashboard = ({
             </div>
           </div>
         );
+      case 'catalog':
+        return (
+          <div className="bg-white rounded-[2.5rem] border-2 border-gray-50 shadow-sm overflow-hidden animate-in fade-in duration-500">
+            <div className="p-8 border-b border-gray-100 flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <h3 className="text-xl font-black text-gray-900 tracking-tight uppercase tracking-widest text-xs">Catalog</h3>
+                <span className="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase tracking-widest">
+                  {products.length} Items
+                </span>
+                {selectedProducts.length > 0 && (
+                  <button
+                    disabled={isMutating}
+                    onClick={deleteSelectedProducts}
+                    className="px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-rose-100 transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 size={14} /> Delete Selected ({selectedProducts.length})
+                  </button>
+                )}
+              </div>
+              <button
+                disabled={isMutating}
+                onClick={() => {
+                  setCreateProductFeedback({ type: '', text: '' });
+                  setIsCreateProductOpen(true);
+                }}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 transition-colors disabled:opacity-40"
+              >
+                <Plus size={14} /> New Product
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-gray-50 bg-gray-50/50">
+                    <th className="px-8 py-5">
+                      <input
+                        type="checkbox"
+                        checked={selectedProducts.length === products.length && products.length > 0}
+                        onChange={toggleAllProducts}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
+                      />
+                    </th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400">ID</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400">Product</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400">Category</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400">Price</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400">Rating</th>
+                    <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-gray-400 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {products.map((product) => (
+                    <tr key={product.id} className={`hover:bg-gray-50/50 transition-colors ${selectedProducts.includes(product.id) ? 'bg-indigo-50/30' : ''}`}>
+                      <td className="px-8 py-6">
+                        <input
+                          type="checkbox"
+                          checked={selectedProducts.includes(product.id)}
+                          onChange={() => toggleProductSelection(product.id)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 w-4 h-4"
+                        />
+                      </td>
+                      <td className="px-8 py-6 font-black text-xs text-indigo-600 tracking-tight">{product.id}</td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="w-10 h-10 rounded-lg object-cover bg-gray-100"
+                          />
+                          <span className="text-sm font-bold text-gray-900">{product.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <span className="px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter bg-gray-100 text-gray-500">
+                          {product.category}
+                        </span>
+                      </td>
+                      <td className="px-8 py-6 font-black text-gray-900 tracking-tighter">${Number(product.price || 0).toFixed(2)}</td>
+                      <td className="px-8 py-6 text-sm font-bold text-amber-600">{product.rating ?? 'N/A'}</td>
+                      <td className="px-8 py-6 text-right space-x-4">
+                        <button onClick={() => setEditingItem({ type: 'product', data: product })} className="text-gray-400 hover:text-indigo-600"><Edit size={16} /></button>
+                        <button disabled={isMutating} onClick={() => deleteSingleProduct(product.id)} className="text-gray-400 hover:text-rose-500 disabled:opacity-40"><Trash2 size={16} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
       default: return null;
     }
   };
@@ -832,6 +1041,8 @@ const AdminDashboard = ({
           </div>
           {[
             { id: 'statistics', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+            { id: 'seeding', label: 'Seeding', icon: <Package size={20} /> },
+            { id: 'catalog', label: 'Catalog', icon: <Package size={20} /> },
             { id: 'users', label: 'Users', icon: <UsersIcon size={20} /> },
             { id: 'orders', label: 'Orders', icon: <ShoppingBag size={20} /> },
           ].map((item) => (
@@ -859,7 +1070,13 @@ const AdminDashboard = ({
       <Modal 
         isOpen={!!editingItem} 
         onClose={() => setEditingItem(null)} 
-        title={`Edit ${editingItem?.type === 'user' ? 'User Identity' : 'Order Status'}`}
+        title={`Edit ${
+          editingItem?.type === 'user'
+            ? 'User Identity'
+            : editingItem?.type === 'order'
+              ? 'Order Status'
+              : 'Product'
+        }`}
       >
         <form onSubmit={handleSaveEdit} className="space-y-6">
           {editingItem?.type === 'user' ? (
@@ -888,7 +1105,7 @@ const AdminDashboard = ({
                 </select>
               </div>
             </>
-          ) : (
+          ) : editingItem?.type === 'order' ? (
             <div>
               <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Order Status</label>
               <select 
@@ -902,6 +1119,74 @@ const AdminDashboard = ({
                 <option>Cancelled</option>
               </select>
             </div>
+          ) : (
+            <>
+              <input
+                required
+                type="text"
+                placeholder="Product Name"
+                className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                value={editingItem?.data.name || ''}
+                onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, name: e.target.value }})}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  required
+                  type="text"
+                  placeholder="Category"
+                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                  value={editingItem?.data.category || ''}
+                  onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, category: e.target.value }})}
+                />
+                <input
+                  required
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="Price"
+                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                  value={editingItem?.data.price ?? 0}
+                  onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, price: Number(e.target.value || 0) }})}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step="0.1"
+                  placeholder="Rating"
+                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                  value={editingItem?.data.rating ?? 0}
+                  onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, rating: Number(e.target.value || 0) }})}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  placeholder="Reviews"
+                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                  value={editingItem?.data.reviews ?? 0}
+                  onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, reviews: Number(e.target.value || 0) }})}
+                />
+              </div>
+              <input
+                required
+                type="url"
+                placeholder="Image URL"
+                className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+                value={editingItem?.data.image || ''}
+                onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, image: e.target.value }})}
+              />
+              <textarea
+                required
+                rows={4}
+                placeholder="Description"
+                className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold resize-none"
+                value={editingItem?.data.description || ''}
+                onChange={(e) => setEditingItem({...editingItem, data: { ...editingItem.data, description: e.target.value }})}
+              />
+            </>
           )}
           <button disabled={isMutating} type="submit" className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 disabled:opacity-40">
             <Save size={18} /> {isMutating ? 'Saving...' : 'Save Changes'}
@@ -976,6 +1261,99 @@ const AdminDashboard = ({
               }`}
             >
               {createUserFeedback.text}
+            </p>
+          )}
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isCreateProductOpen}
+        onClose={() => {
+          setIsCreateProductOpen(false);
+          setCreateProductFeedback({ type: '', text: '' });
+        }}
+        title="Create New Product"
+      >
+        <form onSubmit={handleCreateProduct} className="space-y-4">
+          <input
+            required
+            type="text"
+            placeholder="Product Name"
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+            value={newProductForm.name}
+            onChange={(e) => setNewProductForm((prev) => ({ ...prev, name: e.target.value }))}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <input
+              required
+              type="text"
+              placeholder="Category"
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+              value={newProductForm.category}
+              onChange={(e) => setNewProductForm((prev) => ({ ...prev, category: e.target.value }))}
+            />
+            <input
+              required
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="Price"
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+              value={newProductForm.price}
+              onChange={(e) => setNewProductForm((prev) => ({ ...prev, price: Number(e.target.value || 0) }))}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step="0.1"
+              placeholder="Rating"
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+              value={newProductForm.rating}
+              onChange={(e) => setNewProductForm((prev) => ({ ...prev, rating: Number(e.target.value || 0) }))}
+            />
+            <input
+              type="number"
+              min={0}
+              step="1"
+              placeholder="Reviews"
+              className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+              value={newProductForm.reviews}
+              onChange={(e) => setNewProductForm((prev) => ({ ...prev, reviews: Number(e.target.value || 0) }))}
+            />
+          </div>
+          <input
+            required
+            type="url"
+            placeholder="Image URL"
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold"
+            value={newProductForm.image}
+            onChange={(e) => setNewProductForm((prev) => ({ ...prev, image: e.target.value }))}
+          />
+          <textarea
+            required
+            rows={4}
+            placeholder="Description"
+            className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none outline-none font-bold resize-none"
+            value={newProductForm.description}
+            onChange={(e) => setNewProductForm((prev) => ({ ...prev, description: e.target.value }))}
+          />
+          <button
+            disabled={isMutating}
+            type="submit"
+            className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 disabled:opacity-40"
+          >
+            <Save size={18} /> {isMutating ? 'Creating...' : 'Create Product'}
+          </button>
+          {createProductFeedback.text && (
+            <p
+              className={`text-xs font-bold ${
+                createProductFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-500'
+              }`}
+            >
+              {createProductFeedback.text}
             </p>
           )}
         </form>
@@ -1254,6 +1632,27 @@ export default function App() {
     setOrders((prev) => prev.filter((item) => item.id !== orderId));
   };
 
+  const handleAdminProductCreate = async (payload) => {
+    const data = await apiRequest('/admin/products', { method: 'POST', body: payload });
+    setProducts((prev) => [data.product, ...prev]);
+    setCategories((prev) => (prev.includes(data.product.category) ? prev : [...prev, data.product.category]));
+    setToast('Product created');
+  };
+
+  const handleAdminProductUpdate = async (productId, updates) => {
+    const data = await apiRequest(`/admin/products/${encodeURIComponent(productId)}`, {
+      method: 'PATCH',
+      body: updates
+    });
+    setProducts((prev) => prev.map((item) => (item.id === productId ? data.product : item)));
+    setCategories((prev) => (prev.includes(data.product.category) ? prev : [...prev, data.product.category]));
+  };
+
+  const handleAdminProductDelete = async (productId) => {
+    await apiRequest(`/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+    setProducts((prev) => prev.filter((item) => item.id !== productId));
+  };
+
   const handleDataControlClear = async (targets) => {
     await apiRequest('/admin/data-control/clear', { method: 'POST', body: { targets } });
     await refreshAllData();
@@ -1297,6 +1696,7 @@ export default function App() {
       case 'shop': return <Shop products={products} categories={categories} onAddToCart={addToCart} onProductClick={handleProductClick} />;
       case 'admin': return (
         <AdminDashboard
+          products={products}
           users={users}
           orders={orders}
           currentUserId={user?.id}
@@ -1305,6 +1705,9 @@ export default function App() {
           onDeleteUser={handleAdminUserDelete}
           onUpdateOrder={handleAdminOrderUpdate}
           onDeleteOrder={handleAdminOrderDelete}
+          onCreateProduct={handleAdminProductCreate}
+          onUpdateProduct={handleAdminProductUpdate}
+          onDeleteProduct={handleAdminProductDelete}
           onDataClear={handleDataControlClear}
           onDataSeed={handleDataControlSeed}
           onNotify={setToast}

@@ -183,6 +183,11 @@ function parseOrderId(raw: string) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : NaN;
 }
 
+function parseProductId(raw: string) {
+  const numeric = Number(String(raw).replace(/[^0-9]/g, ''));
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : NaN;
+}
+
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -219,6 +224,49 @@ function normalizeTargetSet(payload: any): Set<string> {
 
 function randomFrom<T>(items: T[]) {
   return items[randomInt(0, items.length - 1)];
+}
+
+function normalizeProductPayload(body: any, partial = false) {
+  const updates: Record<string, any> = {};
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(body || {}, key);
+
+  if (!partial || has('name')) {
+    const name = String(body?.name ?? '').trim();
+    if (!name) throw new Error('Product name is required');
+    updates.name = name;
+  }
+  if (!partial || has('category')) {
+    const category = String(body?.category ?? '').trim();
+    if (!category) throw new Error('Category is required');
+    updates.category = category;
+  }
+  if (!partial || has('description')) {
+    const description = String(body?.description ?? '').trim();
+    if (!description) throw new Error('Description is required');
+    updates.description = description;
+  }
+  if (!partial || has('image')) {
+    const image = String(body?.image ?? '').trim();
+    if (!image) throw new Error('Image URL is required');
+    updates.image = image;
+  }
+  if (!partial || has('price')) {
+    const price = Number(body?.price);
+    if (!Number.isFinite(price) || price < 0) throw new Error('Invalid price value');
+    updates.price = Number(price.toFixed(2));
+  }
+  if (has('rating') || !partial) {
+    const rating = Number(body?.rating ?? 4.5);
+    if (!Number.isFinite(rating) || rating < 0 || rating > 5) throw new Error('Rating must be between 0 and 5');
+    updates.rating = Number(rating.toFixed(2));
+  }
+  if (has('reviews') || !partial) {
+    const reviews = Number(body?.reviews ?? 0);
+    if (!Number.isInteger(reviews) || reviews < 0) throw new Error('Reviews must be a non-negative integer');
+    updates.reviews = reviews;
+  }
+
+  return updates;
 }
 
 async function nextProductId() {
@@ -935,6 +983,91 @@ async function handleRequest(req: Request) {
         .select('id');
       if (error) throw error;
       if (!data || data.length === 0) return response(404, { error: 'Order not found' });
+
+      return noContent();
+    }
+
+    if (path === '/admin/products' && req.method === 'POST') {
+      await requireAdmin(req);
+      const body = await readJson(req);
+      let payload: Record<string, any> = {};
+      try {
+        payload = normalizeProductPayload(body, false);
+      } catch (err) {
+        return response(400, { error: err instanceof Error ? err.message : 'Invalid product payload' });
+      }
+
+      const productId = await nextProductId();
+      const { data, error } = await adminClient
+        .from('products')
+        .insert({ id: productId, ...payload })
+        .select('*')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return response(500, { error: 'Failed to create product' });
+
+      return response(201, { product: data });
+    }
+
+    if (path.startsWith('/admin/products/') && req.method === 'PATCH') {
+      await requireAdmin(req);
+      const productId = parseProductId(path.split('/')[3]);
+      if (!Number.isInteger(productId)) {
+        return response(400, { error: 'Invalid product id' });
+      }
+
+      const body = await readJson(req);
+      let updates: Record<string, any> = {};
+      try {
+        updates = normalizeProductPayload(body, true);
+      } catch (err) {
+        return response(400, { error: err instanceof Error ? err.message : 'Invalid product payload' });
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return response(400, { error: 'No valid fields to update' });
+      }
+
+      const { data, error } = await adminClient
+        .from('products')
+        .update(updates)
+        .eq('id', productId)
+        .select('*')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return response(404, { error: 'Product not found' });
+
+      return response(200, { product: data });
+    }
+
+    if (path.startsWith('/admin/products/') && req.method === 'DELETE') {
+      await requireAdmin(req);
+      const productId = parseProductId(path.split('/')[3]);
+      if (!Number.isInteger(productId)) {
+        return response(400, { error: 'Invalid product id' });
+      }
+
+      const { count: orderItemCount, error: orderItemError } = await adminClient
+        .from('order_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', productId);
+      if (orderItemError) throw orderItemError;
+      if ((orderItemCount || 0) > 0) {
+        return response(400, { error: 'Cannot delete a product that exists in order history' });
+      }
+
+      const { error: cartError } = await adminClient.from('cart_items').delete().eq('product_id', productId);
+      if (cartError) throw cartError;
+
+      const { data, error } = await adminClient
+        .from('products')
+        .delete()
+        .eq('id', productId)
+        .select('id');
+      if (error) throw error;
+      if (!data || data.length === 0) return response(404, { error: 'Product not found' });
 
       return noContent();
     }
