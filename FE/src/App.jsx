@@ -77,6 +77,10 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isAdmin = user?.role === 'Admin';
+  const navigateTo = (page) => {
+    setIsMenuOpen(false);
+    onNavigate(page);
+  };
 
   const navLinks = [
     { name: 'home', label: 'Home' },
@@ -88,21 +92,25 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
     <nav data-testid="fra-navbar-main" className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-50 border-b border-gray-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-8 flex-shrink-0">
             <button 
+              type="button"
               data-testid="btn-nav-home-logo"
-              onClick={() => onNavigate('home')} 
+              onClick={() => navigateTo('home')}
               className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent"
             >
               LUMINA
             </button>
-            <div className="hidden md:flex items-center gap-6">
+            <div data-testid="fra-nav-desktop-links" className="hidden md:flex items-center gap-6 flex-shrink-0">
               {navLinks.map((link) => (
                 <button
+                  type="button"
                   key={link.name}
                   data-testid={`btn-nav-${toKebab(link.name)}`}
-                  onClick={() => onNavigate(link.name)}
-                  className={`text-sm font-bold transition-colors uppercase tracking-widest ${
+                  aria-label={`Navigate to ${link.label}`}
+                  aria-current={currentPage === link.name ? 'page' : undefined}
+                  onClick={() => navigateTo(link.name)}
+                  className={`relative z-10 px-1 py-2 text-sm font-bold transition-colors uppercase tracking-widest ${
                     currentPage === link.name ? 'text-indigo-600' : 'text-gray-400 hover:text-indigo-600'
                   }`}
                 >
@@ -112,7 +120,7 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 min-w-0">
             <div className="hidden sm:flex items-center relative">
               <input 
                 data-testid="txt-nav-search-products"
@@ -120,12 +128,13 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
                 placeholder="Search products..." 
                 className="pl-10 pr-4 py-2 bg-gray-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48 lg:w-64"
               />
-              <Search size={18} className="absolute left-3 text-gray-400" />
+              <Search size={18} className="absolute left-3 text-gray-400 pointer-events-none" />
             </div>
             
             <button 
+              type="button"
               data-testid="btn-nav-profile"
-              onClick={() => user ? onNavigate('profile') : onNavigate('login')}
+              onClick={() => navigateTo(user ? 'profile' : 'login')}
               className="p-2 hover:bg-gray-100 rounded-full text-gray-600 relative group"
               title={user ? "Profile" : "Login"}
             >
@@ -134,8 +143,9 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
             </button>
 
             <button 
+              type="button"
               data-testid="btn-nav-cart"
-              onClick={() => onNavigate('cart')}
+              onClick={() => navigateTo('cart')}
               className="p-2 hover:bg-gray-100 rounded-full text-gray-600 relative"
               title="Cart"
             >
@@ -147,7 +157,7 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
               )}
             </button>
 
-            <button data-testid="btn-nav-mobile-menu" className="md:hidden p-2 text-gray-600" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+            <button type="button" data-testid="btn-nav-mobile-menu" className="md:hidden p-2 text-gray-600" onClick={() => setIsMenuOpen(!isMenuOpen)}>
               {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
           </div>
@@ -157,17 +167,17 @@ const Navbar = ({ cartCount, onNavigate, currentPage, user, onLogout }) => {
       {/* Mobile Menu */}
       {isMenuOpen && (
         <div data-testid="fra-nav-mobile-menu" className="md:hidden bg-white border-t border-gray-100 p-4 space-y-4 shadow-xl">
-          <button data-testid="btn-nav-mobile-home" onClick={() => {onNavigate('home'); setIsMenuOpen(false);}} className="block w-full text-left py-2 text-gray-600 font-medium tracking-widest uppercase text-xs">Home</button>
-          <button data-testid="btn-nav-mobile-shop" onClick={() => {onNavigate('shop'); setIsMenuOpen(false);}} className="block w-full text-left py-2 text-gray-600 font-medium tracking-widest uppercase text-xs">Shop</button>
-          {isAdmin && <button data-testid="btn-nav-mobile-admin" onClick={() => {onNavigate('admin'); setIsMenuOpen(false);}} className="block w-full text-left py-2 text-indigo-600 font-bold tracking-widest uppercase text-xs">Admin</button>}
+          <button type="button" data-testid="btn-nav-mobile-home" onClick={() => navigateTo('home')} className="block w-full text-left py-2 text-gray-600 font-medium tracking-widest uppercase text-xs">Home</button>
+          <button type="button" data-testid="btn-nav-mobile-shop" onClick={() => navigateTo('shop')} className="block w-full text-left py-2 text-gray-600 font-medium tracking-widest uppercase text-xs">Shop</button>
+          {isAdmin && <button type="button" data-testid="btn-nav-mobile-admin" onClick={() => navigateTo('admin')} className="block w-full text-left py-2 text-indigo-600 font-bold tracking-widest uppercase text-xs">Admin</button>}
           <div className="pt-4 border-t border-gray-100">
             {user ? (
               <div className="space-y-4">
-                <button data-testid="btn-nav-mobile-profile" onClick={() => {onNavigate('profile'); setIsMenuOpen(false);}} className="block w-full text-left text-gray-600 font-medium">My Profile</button>
-                <button data-testid="btn-nav-mobile-logout" onClick={() => {onLogout(); setIsMenuOpen(false);}} className="text-red-500 font-bold">Logout</button>
+                <button type="button" data-testid="btn-nav-mobile-profile" onClick={() => navigateTo('profile')} className="block w-full text-left text-gray-600 font-medium">My Profile</button>
+                <button type="button" data-testid="btn-nav-mobile-logout" onClick={() => {onLogout(); setIsMenuOpen(false);}} className="text-red-500 font-bold">Logout</button>
               </div>
             ) : (
-              <button data-testid="btn-nav-mobile-sign-in" onClick={() => {onNavigate('login'); setIsMenuOpen(false);}} className="text-indigo-600 font-bold">Sign In</button>
+              <button type="button" data-testid="btn-nav-mobile-sign-in" onClick={() => navigateTo('login')} className="text-indigo-600 font-bold">Sign In</button>
             )}
           </div>
         </div>
@@ -266,7 +276,7 @@ const Home = ({ onNavigate, topCategories }) => (
     </section>
 
     {/* Featured Categories */}
-    <section data-testid="fra-home-top-categories" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section data-testid="fra-home-top-categories" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-24">
       <div className="flex flex-col md:flex-row justify-between items-end gap-6 mb-12">
         <div className="space-y-2">
           <h2 data-testid="txt-home-top-categories-title" className="text-4xl font-black text-gray-900 tracking-tight">Top Categories</h2>
@@ -763,6 +773,22 @@ const AdminDashboard = ({
     setSelectedOrders((prev) => [...new Set([...prev, ...visibleIds])]);
   };
   const deleteSelectedOrders = async () => {
+    const isCancelledStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      return normalized === 'cancelled' || normalized === 'canceled';
+    };
+
+    const nonCancelledOrders = selectedOrders
+      .map((id) => orders.find((order) => order.id === id))
+      .filter((order) => order && !isCancelledStatus(order.status));
+
+    if (nonCancelledOrders.length > 0) {
+      const shouldDelete = confirm(
+        `This will delete ${nonCancelledOrders.length} non-cancelled order(s). Do you want to continue?`
+      );
+      if (!shouldDelete) return;
+    }
+
     setIsMutating(true);
     try {
       await Promise.all(selectedOrders.map((id) => onDeleteOrder(id)));
@@ -814,6 +840,14 @@ const AdminDashboard = ({
   };
 
   const deleteSingleOrder = async (id) => {
+    const targetOrder = orders.find((order) => order.id === id);
+    const normalizedStatus = String(targetOrder?.status || '').trim().toLowerCase();
+    const isCancelled = normalizedStatus === 'cancelled' || normalizedStatus === 'canceled';
+    if (!isCancelled) {
+      const shouldDelete = confirm('This order is not cancelled. Do you want to delete it?');
+      if (!shouldDelete) return;
+    }
+
     setIsMutating(true);
     try {
       await onDeleteOrder(id);

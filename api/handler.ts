@@ -310,7 +310,23 @@ function formatShortDate(input: string | Date | null | undefined) {
 }
 
 function parseOrderId(raw: string) {
-  const numeric = Number(String(raw).replace(/[^0-9]/g, ''));
+  const input = String(raw || '').trim();
+  let decoded = input;
+  try {
+    decoded = decodeURIComponent(input);
+  } catch {
+    decoded = input;
+  }
+
+  if (/^\d+$/.test(decoded)) {
+    const numeric = Number(decoded);
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : NaN;
+  }
+
+  const match = decoded.match(/^#?ORD-(\d+)$/i);
+  if (!match) return NaN;
+
+  const numeric = Number(match[1]);
   return Number.isInteger(numeric) && numeric > 0 ? numeric : NaN;
 }
 
