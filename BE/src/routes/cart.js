@@ -19,9 +19,14 @@ async function fetchCartByUser(userId) {
     `SELECT
       c.product_id AS id,
       p.name,
+      p.slug,
       p.price,
       p.category,
       p.image,
+      p.short_description,
+      p.inventory_count,
+      p.is_featured,
+      p.gallery,
       p.rating,
       p.reviews,
       p.description,
@@ -34,16 +39,31 @@ async function fetchCartByUser(userId) {
     [userId]
   );
 
-  const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const normalizedItems = items.map((item) => ({
+    ...item,
+    shortDescription: item.short_description || item.description,
+    inventoryCount: Number(item.inventory_count ?? 0),
+    isFeatured: Boolean(item.is_featured),
+    gallery: (() => {
+      try {
+        const parsed = JSON.parse(item.gallery || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })()
+  }));
+
+  const subtotal = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
   const shipping = subtotal > 150 || subtotal === 0 ? 0 : 15;
 
   return {
-    items,
+    items: normalizedItems,
     summary: {
       subtotal,
       shipping,
       total: subtotal + shipping,
-      itemCount: items.reduce((sum, item) => sum + item.quantity, 0)
+      itemCount: normalizedItems.reduce((sum, item) => sum + item.quantity, 0)
     }
   };
 }

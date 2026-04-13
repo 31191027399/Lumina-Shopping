@@ -49,6 +49,17 @@ const PRODUCT_TEMPLATE_POOL = [
 
 const FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Riley', 'Casey', 'Avery', 'Cameron', 'Finley', 'Reese'];
 const LAST_NAMES = ['Nguyen', 'Tran', 'Pham', 'Le', 'Hoang', 'Vo', 'Do', 'Bui', 'Dang', 'Huynh'];
+const PROFILE_SELECT_COLUMNS =
+  'id,name,email,phone,address_line1,address_line2,address_city,address_state,address_postal_code,role,status,created_at';
+const ORDER_UPDATE_REQUEST_ALLOWED_FIELDS = [
+  'shippingRecipient',
+  'shippingPhone',
+  'shippingAddressLine1',
+  'shippingAddressLine2',
+  'shippingCity',
+  'shippingState',
+  'shippingPostalCode'
+];
 
 function readEnv(...keys: string[]) {
   for (const key of keys) {
@@ -113,6 +124,119 @@ function parseSort(sort: string | null) {
       return { column: 'id', ascending: true };
   }
 }
+
+function slugify(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
+}
+
+function normalizeGallery(value: unknown, fallbackImage = '') {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  return fallbackImage ? [fallbackImage] : [];
+}
+
+function mapProductRecord(product: Record<string, any>) {
+  const gallery = normalizeGallery(product.gallery, product.image);
+  return {
+    id: product.id,
+    name: product.name,
+    slug: product.slug || slugify(product.name),
+    price: Number(product.price),
+    category: product.category,
+    image: product.image,
+    shortDescription: product.short_description || product.description,
+    inventoryCount: Number(product.inventory_count ?? 0),
+    isFeatured: Boolean(product.is_featured),
+    gallery,
+    rating: Number(product.rating),
+    reviews: Number(product.reviews || 0),
+    description: product.description
+  };
+}
+
+function mapOrderRecord(order: Record<string, any>, items: Array<Record<string, any>> = []) {
+  return {
+    id: order.id,
+    subtotal: Number(order.subtotal),
+    shipping: Number(order.shipping),
+    total: Number(order.total),
+    status: order.status,
+    paymentMethod: order.payment_method || 'card',
+    createdAt: order.created_at,
+    shippingAddress: order.shipping_address || order.shipping_address_line1 || '',
+    shippingDetails: {
+      recipient: order.shipping_recipient || '',
+      phone: order.shipping_phone || '',
+      addressLine1: order.shipping_address_line1 || '',
+      addressLine2: order.shipping_address_line2 || '',
+      city: order.shipping_city || '',
+      state: order.shipping_state || '',
+      postalCode: order.shipping_postal_code || ''
+    },
+    items
+  };
+}
+
+function mapProfileRecord(profile: Record<string, any> | null | undefined, fallback: UserContext, stats: { orderCount?: number; totalSpent?: number } = {}) {
+  return {
+    id: profile?.id || fallback.id,
+    name: profile?.name || fallback.email.split('@')[0],
+    email: profile?.email || fallback.email,
+    phone: profile?.phone || '',
+    addressLine1: profile?.address_line1 || '',
+    addressLine2: profile?.address_line2 || '',
+    addressCity: profile?.address_city || '',
+    addressState: profile?.address_state || '',
+    addressPostalCode: profile?.address_postal_code || '',
+    role: profile?.role || fallback.role,
+    status: profile?.status || 'Active',
+    joined: formatShortDate(profile?.created_at),
+    orderCount: stats.orderCount ?? 0,
+    totalSpent: stats.totalSpent ?? 0
+  };
+}
+
+function mapOrderUpdateRequestRecord(request: Record<string, any>) {
+  return {
+    id: request.id,
+    orderId: request.order_id,
+    userId: request.user_id,
+    requestedChanges: request.requested_changes || request.requestedChanges || {},
+    reason: request.reason || '',
+    status: request.status || 'Pending',
+    adminNote: request.admin_note || '',
+    reviewedBy: request.reviewed_by || null,
+    reviewedAt: request.reviewed_at || null,
+    createdAt: request.created_at || null
+  };
+}
+
+function normalizeOptionalText(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function collectOrderUpdateChanges(body: Record<string, any>) {
+  const requestedChanges: Record<string, string> = {};
+
+  for (const field of ORDER_UPDATE_REQUEST_ALLOWED_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      const value = normalizeOptionalText(body[field]);
+      if (value) {
+        requestedChanges[field] = value;
+      }
+    }
+  }
+
+  return requestedChanges;
+}
+
+const CUSTOMER_CANCELLABLE_STATUSES = new Set(['PLACED', 'PROCESSING']);
 
 async function getUserFromAuth(req: Request): Promise<UserContext> {
   const authHeader = req.headers.get('authorization') || '';
@@ -227,9 +351,14 @@ function buildDummyProducts(startId: number, count: number) {
     return {
       id: sku,
       name: `${base.name} ${sku}`,
+      slug: slugify(`${base.name} ${sku}`),
       price: randomPrice(19, 399),
       category: base.category,
       image: base.image,
+      short_description: base.description.slice(0, 96),
+      inventory_count: randomInt(12, 60),
+      is_featured: idx % 4 === 0,
+      gallery: [base.image],
       rating: randomPrice(3.6, 5.0),
       reviews: randomInt(8, 500),
       description: base.description
@@ -350,26 +479,30 @@ async function requireAdmin(req: Request) {
 }
 
 async function getCartSummary(userId: string) {
-  const { data, error } = await adminClient
+  let data = null;
+  let error = null;
+
+  ({ data, error } = await adminClient
     .from('cart_items')
-    .select('quantity, product:products(id,name,price,category,image,rating,reviews,description)')
+    .select('quantity, product:products(id,name,slug,price,category,image,short_description,inventory_count,is_featured,gallery,rating,reviews,description)')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }));
+
+  if (error && /column .* does not exist/i.test(String(error.message || ''))) {
+    ({ data, error } = await adminClient
+      .from('cart_items')
+      .select('quantity, product:products(id,name,price,category,image,rating,reviews,description)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }));
+  }
 
   if (error) throw error;
 
   const items = (data || []).map((row: any) => {
-    const product = row.product;
+    const product = mapProductRecord(row.product || {});
     const lineTotal = Number(product.price) * row.quantity;
     return {
-      id: product.id,
-      name: product.name,
-      price: Number(product.price),
-      category: product.category,
-      image: product.image,
-      rating: Number(product.rating),
-      reviews: product.reviews,
-      description: product.description,
+      ...product,
       quantity: row.quantity,
       lineTotal
     };
@@ -408,9 +541,13 @@ Deno.serve(async (req) => {
       const category = url.searchParams.get('category');
       const search = url.searchParams.get('search');
       const sort = url.searchParams.get('sort');
+      const minPrice = url.searchParams.get('minPrice');
+      const maxPrice = url.searchParams.get('maxPrice');
+      const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 12), 1), 48);
       const order = parseSort(sort);
 
-      let query = adminClient.from('products').select('*');
+      let query = adminClient.from('products').select('*', { count: 'exact' });
 
       if (category && category !== 'All') {
         query = query.eq('category', category);
@@ -420,10 +557,29 @@ Deno.serve(async (req) => {
         query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
       }
 
-      const { data, error } = await query.order(order.column, { ascending: order.ascending });
+      if (minPrice) {
+        query = query.gte('price', Number(minPrice));
+      }
+
+      if (maxPrice) {
+        query = query.lte('price', Number(maxPrice));
+      }
+
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+      const { data, error, count } = await query.order(order.column, { ascending: order.ascending }).range(from, to);
       if (error) throw error;
 
-      return response(200, { items: data || [], count: (data || []).length });
+      const items = (data || []).map((item: any) => mapProductRecord(item));
+      const totalItems = Number(count || 0);
+      return response(200, {
+        items,
+        count: items.length,
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.max(Math.ceil(totalItems / limit), 1)
+      });
     }
 
     if (path === '/products/categories' && req.method === 'GET') {
@@ -435,11 +591,32 @@ Deno.serve(async (req) => {
     }
 
     if (path.startsWith('/products/') && req.method === 'GET') {
+      if (path.endsWith('/related')) {
+        const id = Number(path.split('/')[2]);
+        const { data: current, error: currentError } = await adminClient
+          .from('products')
+          .select('id,category')
+          .eq('id', id)
+          .maybeSingle();
+        if (currentError) throw currentError;
+        if (!current) return response(404, { error: 'Product not found' });
+
+        const { data: related, error: relatedError } = await adminClient
+          .from('products')
+          .select('*')
+          .eq('category', current.category)
+          .neq('id', current.id)
+          .order('rating', { ascending: false })
+          .limit(4);
+        if (relatedError) throw relatedError;
+        return response(200, { items: (related || []).map((item: any) => mapProductRecord(item)), count: (related || []).length });
+      }
+
       const id = Number(path.split('/')[2]);
       const { data, error } = await adminClient.from('products').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       if (!data) return response(404, { error: 'Product not found' });
-      return response(200, data as Json);
+      return response(200, mapProductRecord(data as Record<string, any>));
     }
 
     if (path === '/auth/register' && req.method === 'POST') {
@@ -466,7 +643,7 @@ Deno.serve(async (req) => {
       if (data.user?.id) {
         const profileResult = await adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', data.user.id)
           .maybeSingle();
         profile = profileResult.data;
@@ -494,7 +671,7 @@ Deno.serve(async (req) => {
       if (data.user?.id) {
         const profileResult = await adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', data.user.id)
           .maybeSingle();
         profile = profileResult.data;
@@ -512,7 +689,7 @@ Deno.serve(async (req) => {
       const [{ data: profile }, { data: orders }] = await Promise.all([
         adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', user.id)
           .maybeSingle(),
         adminClient.from('orders').select('id,total').eq('user_id', user.id)
@@ -521,17 +698,107 @@ Deno.serve(async (req) => {
       const orderCount = (orders || []).length;
       const totalSpent = (orders || []).reduce((sum: number, o: any) => sum + Number(o.total), 0);
 
-      return response(200, {
-        user: {
-          id: user.id,
-          name: profile?.name || user.email.split('@')[0],
-          email: profile?.email || user.email,
-          role: profile?.role || user.role,
-          status: profile?.status || 'Active',
-          joined: formatShortDate(profile?.created_at),
-          orderCount,
-          totalSpent
+      return response(200, { user: mapProfileRecord(profile, user, { orderCount, totalSpent }) });
+    }
+
+    if (path === '/auth/me' && req.method === 'PATCH') {
+      const user = await getUserFromAuth(req);
+      const body = await readJson(req);
+      const { data: currentProfile, error: currentProfileError } = await adminClient
+        .from('profiles')
+        .select(PROFILE_SELECT_COLUMNS)
+        .eq('id', user.id)
+        .maybeSingle();
+      if (currentProfileError) throw currentProfileError;
+      if (!currentProfile) return response(404, { error: 'Profile not found' });
+
+      const profileUpdates: Record<string, string | null> = {};
+      const name = normalizeOptionalText(body.name);
+      const rawEmail = normalizeOptionalText(body.email);
+      const email = typeof rawEmail === 'string' ? rawEmail.toLowerCase() : rawEmail;
+      const phone = normalizeOptionalText(body.phone);
+      const addressLine1 = normalizeOptionalText(body.addressLine1);
+      const addressLine2 = normalizeOptionalText(body.addressLine2);
+      const addressCity = normalizeOptionalText(body.addressCity);
+      const addressState = normalizeOptionalText(body.addressState);
+      const addressPostalCode = normalizeOptionalText(body.addressPostalCode);
+      let emailChanged = false;
+
+      if (name !== undefined) {
+        if (!name) return response(400, { error: 'name cannot be empty' });
+        profileUpdates.name = name;
+      }
+
+      if (email !== undefined) {
+        if (!email) return response(400, { error: 'email cannot be empty' });
+        if (email !== String(currentProfile.email || '').toLowerCase()) {
+          const { data: existingEmailOwner, error: emailLookupError } = await adminClient
+            .from('profiles')
+            .select('id')
+            .eq('email', email)
+            .neq('id', user.id)
+            .maybeSingle();
+          if (emailLookupError) throw emailLookupError;
+          if (existingEmailOwner) return response(409, { error: 'Email is already in use' });
+
+          const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, { email });
+          if (authUpdateError) return response(400, { error: authUpdateError.message });
+          emailChanged = true;
         }
+        profileUpdates.email = email;
+      }
+
+      if (phone !== undefined) profileUpdates.phone = phone;
+      if (addressLine1 !== undefined) profileUpdates.address_line1 = addressLine1;
+      if (addressLine2 !== undefined) profileUpdates.address_line2 = addressLine2;
+      if (addressCity !== undefined) profileUpdates.address_city = addressCity;
+      if (addressState !== undefined) profileUpdates.address_state = addressState;
+      if (addressPostalCode !== undefined) profileUpdates.address_postal_code = addressPostalCode;
+
+      if (Object.keys(profileUpdates).length === 0) {
+        return response(400, { error: 'No valid fields to update' });
+      }
+
+      const { data: updatedProfile, error: updateError } = await adminClient
+        .from('profiles')
+        .update(profileUpdates)
+        .eq('id', user.id)
+        .select(PROFILE_SELECT_COLUMNS)
+        .maybeSingle();
+
+      if (updateError) {
+        if (emailChanged) {
+          await adminClient.auth.admin.updateUserById(user.id, {
+            email: String(currentProfile.email || user.email)
+          }).catch(() => null);
+        }
+        throw updateError;
+      }
+
+      const [{ data: orderTotals }, { data: orderIds }] = await Promise.all([
+        adminClient.from('orders').select('total').eq('user_id', user.id),
+        adminClient.from('orders').select('id').eq('user_id', user.id)
+      ]);
+      const totalSpent = (orderTotals || []).reduce((sum: number, order: any) => sum + Number(order.total), 0);
+      const orderCount = (orderIds || []).length;
+
+      return response(200, {
+        user: mapProfileRecord(updatedProfile, user, { orderCount, totalSpent })
+      });
+    }
+
+    if (path === '/order-update-requests' && req.method === 'GET') {
+      const user = await getUserFromAuth(req);
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      return response(200, {
+        items: (data || []).map((request: any) => mapOrderUpdateRequestRecord(request)),
+        count: (data || []).length
       });
     }
 
@@ -635,8 +902,15 @@ Deno.serve(async (req) => {
     if (path === '/orders/checkout' && req.method === 'POST') {
       const user = await getUserFromAuth(req);
       const body = await readJson(req);
-      const shippingAddress = body.shippingAddress ? String(body.shippingAddress) : null;
+      const shippingAddress = body.shippingAddress ? String(body.shippingAddress) : String(body.shippingAddressLine1 || '');
       const paymentMethod = body.paymentMethod ? String(body.paymentMethod) : 'card';
+      const shippingRecipient = String(body.shippingRecipient || '');
+      const shippingPhone = String(body.shippingPhone || '');
+      const shippingAddressLine1 = String(body.shippingAddressLine1 || '');
+      const shippingAddressLine2 = String(body.shippingAddressLine2 || '');
+      const shippingCity = String(body.shippingCity || '');
+      const shippingState = String(body.shippingState || '');
+      const shippingPostalCode = String(body.shippingPostalCode || '');
 
       const { data, error } = await adminClient.rpc('create_order_from_cart', {
         p_user_id: user.id,
@@ -651,14 +925,119 @@ Deno.serve(async (req) => {
         throw error;
       }
 
+      const orderId = (data as any)?.id;
+      if (orderId) {
+        const { error: updateError } = await adminClient
+          .from('orders')
+          .update({
+            shipping_recipient: shippingRecipient,
+            shipping_phone: shippingPhone,
+            shipping_address_line1: shippingAddressLine1,
+            shipping_address_line2: shippingAddressLine2,
+            shipping_city: shippingCity,
+            shipping_state: shippingState,
+            shipping_postal_code: shippingPostalCode
+          })
+          .eq('id', orderId);
+        if (updateError) throw updateError;
+
+        const { data: order, error: orderError } = await adminClient
+          .from('orders')
+          .select('*')
+          .eq('id', orderId)
+          .maybeSingle();
+        if (orderError) throw orderError;
+
+        const { data: items, error: itemError } = await adminClient
+          .from('order_items')
+          .select('product_id,product_name,product_category,unit_price,quantity,total_price')
+          .eq('order_id', orderId)
+          .order('id', { ascending: true });
+        if (itemError) throw itemError;
+
+        return response(
+          201,
+          {
+            order: mapOrderRecord(
+              order as Record<string, any>,
+              (items || []).map((item: any) => ({
+                productId: item.product_id,
+                productName: item.product_name,
+                productCategory: item.product_category,
+                unitPrice: Number(item.unit_price),
+                quantity: item.quantity,
+                totalPrice: Number(item.total_price)
+              }))
+            )
+          }
+        );
+      }
+
       return response(201, { order: data });
+    }
+
+    if (path.startsWith('/orders/') && path.endsWith('/update-request') && req.method === 'POST') {
+      const user = await getUserFromAuth(req);
+      const orderId = Number(path.split('/')[2]);
+      const body = await readJson(req);
+      const reason = normalizeOptionalText(body.reason) || '';
+      const requestedChanges = collectOrderUpdateChanges(
+        body.requestedChanges && typeof body.requestedChanges === 'object' ? body.requestedChanges : body
+      );
+
+      if (!Number.isInteger(orderId) || orderId < 1) {
+        return response(400, { error: 'Invalid order id' });
+      }
+
+      if (Object.keys(requestedChanges).length === 0) {
+        return response(400, { error: 'At least one order update field is required' });
+      }
+
+      const { data: order, error: orderError } = await adminClient
+        .from('orders')
+        .select('id,status')
+        .eq('id', orderId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) return response(404, { error: 'Order not found' });
+      if (String(order.status || '').toLowerCase() === 'cancelled') {
+        return response(400, { error: 'Cancelled orders cannot be updated' });
+      }
+
+      const { data: existingPending, error: pendingError } = await adminClient
+        .from('order_update_requests')
+        .select('id')
+        .eq('order_id', orderId)
+        .eq('user_id', user.id)
+        .eq('status', 'Pending')
+        .maybeSingle();
+      if (pendingError) throw pendingError;
+      if (existingPending) {
+        return response(409, { error: 'A pending update request already exists for this order' });
+      }
+
+      const { data: request, error } = await adminClient
+        .from('order_update_requests')
+        .insert({
+          order_id: orderId,
+          user_id: user.id,
+          requested_changes: requestedChanges,
+          reason,
+          status: 'Pending'
+        })
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .maybeSingle();
+      if (error) throw error;
+
+      return response(201, { request: mapOrderUpdateRequestRecord(request as Record<string, any>) });
     }
 
     if (path === '/admin/users' && req.method === 'GET') {
       await requireAdmin(req);
       const { data, error } = await adminClient
         .from('profiles')
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -672,6 +1051,60 @@ Deno.serve(async (req) => {
       }));
 
       return response(200, { items, count: items.length });
+    }
+
+    if (path === '/admin/order-update-requests' && req.method === 'GET') {
+      await requireAdmin(req);
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      return response(200, {
+        items: (data || []).map((request: any) => mapOrderUpdateRequestRecord(request)),
+        count: (data || []).length
+      });
+    }
+
+    if (path.startsWith('/admin/order-update-requests/') && req.method === 'PATCH') {
+      const adminUser = await requireAdmin(req);
+      const requestId = Number(path.split('/')[3]);
+      const body = await readJson(req);
+      const status = String(body.status || '').trim();
+      const adminNote = normalizeOptionalText(body.adminNote);
+
+      if (!Number.isInteger(requestId) || requestId < 1) {
+        return response(400, { error: 'Invalid request id' });
+      }
+
+      if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
+        return response(400, { error: 'Invalid status value' });
+      }
+
+      const reviewFields: Record<string, unknown> = {
+        status,
+        admin_note: adminNote || null
+      };
+
+      if (status === 'Pending') {
+        reviewFields.reviewed_by = null;
+        reviewFields.reviewed_at = null;
+      } else {
+        reviewFields.reviewed_by = adminUser.id;
+        reviewFields.reviewed_at = new Date().toISOString();
+      }
+
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .update(reviewFields)
+        .eq('id', requestId)
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return response(404, { error: 'Request not found' });
+
+      return response(200, { request: mapOrderUpdateRequestRecord(data as Record<string, any>) });
     }
 
     if (path === '/admin/users' && req.method === 'POST') {
@@ -715,7 +1148,7 @@ Deno.serve(async (req) => {
         .from('profiles')
         .update({ name, role, status })
         .eq('id', userId)
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .maybeSingle();
 
       if (error) throw error;
@@ -767,7 +1200,7 @@ Deno.serve(async (req) => {
         .from('profiles')
         .update(updates)
         .eq('id', userId)
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .maybeSingle();
 
       if (error) throw error;
@@ -1010,26 +1443,46 @@ Deno.serve(async (req) => {
 
     if (path === '/orders' && req.method === 'GET') {
       const user = await getUserFromAuth(req);
-      const { data, error } = await adminClient
+      let data = null;
+      let error = null;
+      ({ data, error } = await adminClient
         .from('orders')
-        .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+        .select('id,subtotal,shipping,total,shipping_address,shipping_recipient,shipping_phone,shipping_address_line1,shipping_address_line2,shipping_city,shipping_state,shipping_postal_code,payment_method,status,created_at')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
+      if (error && /column .* does not exist/i.test(String(error.message || ''))) {
+        ({ data, error } = await adminClient
+          .from('orders')
+          .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }));
+      }
       if (error) throw error;
 
-      return response(200, { items: data || [], count: (data || []).length });
+      const items = (data || []).map((item: any) => mapOrderRecord(item));
+      return response(200, { items, count: items.length });
     }
 
     if (path.startsWith('/orders/') && req.method === 'GET') {
       const user = await getUserFromAuth(req);
       const orderId = Number(path.split('/')[2]);
 
-      const { data: order, error: orderError } = await adminClient
+      let order = null;
+      let orderError = null;
+      ({ data: order, error: orderError } = await adminClient
         .from('orders')
-        .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+        .select('id,subtotal,shipping,total,shipping_address,shipping_recipient,shipping_phone,shipping_address_line1,shipping_address_line2,shipping_city,shipping_state,shipping_postal_code,payment_method,status,created_at')
         .eq('id', orderId)
         .eq('user_id', user.id)
-        .maybeSingle();
+        .maybeSingle());
+      if (orderError && /column .* does not exist/i.test(String(orderError.message || ''))) {
+        ({ data: order, error: orderError } = await adminClient
+          .from('orders')
+          .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+          .eq('id', orderId)
+          .eq('user_id', user.id)
+          .maybeSingle());
+      }
 
       if (orderError) throw orderError;
       if (!order) return response(404, { error: 'Order not found' });
@@ -1042,7 +1495,108 @@ Deno.serve(async (req) => {
 
       if (itemError) throw itemError;
 
-      return response(200, { ...order, items: items || [] });
+      return response(
+        200,
+        mapOrderRecord(
+          order as Record<string, any>,
+          (items || []).map((item: any) => ({
+            productId: item.product_id,
+            productName: item.product_name,
+            productCategory: item.product_category,
+            unitPrice: Number(item.unit_price),
+            quantity: item.quantity,
+            totalPrice: Number(item.total_price)
+          }))
+        )
+      );
+    }
+
+    if (path.startsWith('/orders/') && req.method === 'PATCH') {
+      const user = await getUserFromAuth(req);
+      const orderId = Number(path.split('/')[2]);
+      const body = await readJson(req);
+      const action = String(body.action || '').trim().toLowerCase();
+
+      const { data: order, error: orderError } = await adminClient
+        .from('orders')
+        .select('id,status')
+        .eq('id', orderId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) return response(404, { error: 'Order not found' });
+      if (action !== 'cancel') return response(400, { error: 'Unsupported order action' });
+      if (!CUSTOMER_CANCELLABLE_STATUSES.has(String(order.status || '').toUpperCase())) {
+        return response(400, { error: 'Only placed or processing orders can be cancelled' });
+      }
+
+      const { data: updated, error: updateError } = await adminClient
+        .from('orders')
+        .update({ status: 'Cancelled' })
+        .eq('id', orderId)
+        .eq('user_id', user.id)
+        .select('id,subtotal,shipping,total,shipping_address,shipping_recipient,shipping_phone,shipping_address_line1,shipping_address_line2,shipping_city,shipping_state,shipping_postal_code,payment_method,status,created_at')
+        .maybeSingle();
+      if (updateError && /column .* does not exist/i.test(String(updateError.message || ''))) {
+        const { data: fallback, error: fallbackError } = await adminClient
+          .from('orders')
+          .update({ status: 'Cancelled' })
+          .eq('id', orderId)
+          .eq('user_id', user.id)
+          .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+          .maybeSingle();
+        if (fallbackError) throw fallbackError;
+        return response(200, { order: mapOrderRecord(fallback as Record<string, any>) });
+      }
+      if (updateError) throw updateError;
+
+      return response(200, { order: mapOrderRecord(updated as Record<string, any>) });
+    }
+
+    if (path.startsWith('/orders/') && path.endsWith('/reorder') && req.method === 'POST') {
+      const user = await getUserFromAuth(req);
+      const orderId = Number(path.split('/')[2]);
+
+      const { data: order, error: orderError } = await adminClient
+        .from('orders')
+        .select('id')
+        .eq('id', orderId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) return response(404, { error: 'Order not found' });
+
+      const { data: items, error: itemsError } = await adminClient
+        .from('order_items')
+        .select('product_id,quantity')
+        .eq('order_id', orderId);
+      if (itemsError) throw itemsError;
+
+      for (const item of items || []) {
+        const { data: existing, error: existingError } = await adminClient
+          .from('cart_items')
+          .select('quantity')
+          .eq('user_id', user.id)
+          .eq('product_id', item.product_id)
+          .maybeSingle();
+        if (existingError) throw existingError;
+
+        if (existing) {
+          const { error: updateCartError } = await adminClient
+            .from('cart_items')
+            .update({ quantity: Number(existing.quantity || 0) + Number(item.quantity || 0) })
+            .eq('user_id', user.id)
+            .eq('product_id', item.product_id);
+          if (updateCartError) throw updateCartError;
+        } else {
+          const { error: insertCartError } = await adminClient
+            .from('cart_items')
+            .insert({ user_id: user.id, product_id: item.product_id, quantity: item.quantity });
+          if (insertCartError) throw insertCartError;
+        }
+      }
+
+      return response(201, { ok: true });
     }
 
     return response(404, { error: 'Route not found' });

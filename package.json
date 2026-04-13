@@ -2,6 +2,12 @@
   "name": "testing-website",
   "private": true,
   "type": "module",
+  "scripts": {
+    "sonar:up": "docker compose -f docker-compose.sonarqube.yml up -d sonarqube",
+    "sonar:down": "docker compose -f docker-compose.sonarqube.yml down",
+    "sonar:logs": "docker compose -f docker-compose.sonarqube.yml logs -f sonarqube",
+    "sonar:scan": "docker compose -f docker-compose.sonarqube.yml run --rm scanner"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"
   }

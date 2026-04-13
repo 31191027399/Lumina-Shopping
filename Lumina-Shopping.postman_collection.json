@@ -105,7 +105,26 @@
               "raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"password123\"\n}"
             },
             "url": "{{baseUrl}}/auth/login"
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var json = pm.response.json();",
+                  "  var t = json.token || json.accessToken || (json.data && json.data.token);",
+                  "  if (t) {",
+                  "    pm.environment.set('token', t);",
+                  "  }",
+                  "} catch (e) {",
+                  "  // Ignore token extraction errors; manual login can provide the token.",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Auth Password Reset",
@@ -222,7 +241,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"productId\": {{productId}},\n  \"quantity\": 1\n}"
+              "raw": "{\\n  \":\\\"productId\\\": {{productId}},\\n  \":\\\"quantity\\\": 1,\\n  \":\\\"note\\\": \"\\"\\n}"
             },
             "url": "{{baseUrl}}/cart/items"
           }

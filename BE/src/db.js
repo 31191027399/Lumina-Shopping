@@ -39,6 +39,20 @@ export function all(sql, params = []) {
   });
 }
 
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
+}
+
+async function ensureColumn(table, column, definition) {
+  const columns = await all(`PRAGMA table_info(${table})`);
+  if (!columns.some((item) => item.name === column)) {
+    await run(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  }
+}
+
 const productSeeds = [
   {
     id: 1,
@@ -120,7 +134,14 @@ const productSeeds = [
     reviews: 92,
     description: 'Ultra-soft sustainable cotton blend. Designed for comfort and durability.'
   }
-];
+].map((product, index) => ({
+  ...product,
+  slug: slugify(product.name),
+  shortDescription: product.description.slice(0, 96),
+  inventoryCount: 18 + index * 5,
+  isFeatured: index < 4 ? 1 : 0,
+  gallery: JSON.stringify([product.image, product.image])
+}));
 
 export async function initDb() {
   await run('PRAGMA foreign_keys = ON');
@@ -150,9 +171,14 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
+      slug TEXT,
       price REAL NOT NULL,
       category TEXT NOT NULL,
       image TEXT NOT NULL,
+      short_description TEXT,
+      inventory_count INTEGER NOT NULL DEFAULT 25,
+      is_featured INTEGER NOT NULL DEFAULT 0,
+      gallery TEXT NOT NULL DEFAULT '[]',
       rating REAL NOT NULL,
       reviews INTEGER NOT NULL,
       description TEXT NOT NULL,
@@ -181,6 +207,13 @@ export async function initDb() {
       shipping REAL NOT NULL,
       total REAL NOT NULL,
       shipping_address TEXT,
+      shipping_recipient TEXT,
+      shipping_phone TEXT,
+      shipping_address_line1 TEXT,
+      shipping_address_line2 TEXT,
+      shipping_city TEXT,
+      shipping_state TEXT,
+      shipping_postal_code TEXT,
       payment_method TEXT,
       status TEXT NOT NULL DEFAULT 'PLACED',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -203,23 +236,48 @@ export async function initDb() {
     )
   `);
 
+  await ensureColumn('products', 'slug', 'slug TEXT');
+  await ensureColumn('products', 'short_description', 'short_description TEXT');
+  await ensureColumn('products', 'inventory_count', 'inventory_count INTEGER NOT NULL DEFAULT 25');
+  await ensureColumn('products', 'is_featured', 'is_featured INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('products', 'gallery', `gallery TEXT NOT NULL DEFAULT '[]'`);
+  await ensureColumn('orders', 'shipping_recipient', 'shipping_recipient TEXT');
+  await ensureColumn('orders', 'shipping_phone', 'shipping_phone TEXT');
+  await ensureColumn('orders', 'shipping_address_line1', 'shipping_address_line1 TEXT');
+  await ensureColumn('orders', 'shipping_address_line2', 'shipping_address_line2 TEXT');
+  await ensureColumn('orders', 'shipping_city', 'shipping_city TEXT');
+  await ensureColumn('orders', 'shipping_state', 'shipping_state TEXT');
+  await ensureColumn('orders', 'shipping_postal_code', 'shipping_postal_code TEXT');
+
   const hasProducts = await get('SELECT id FROM products LIMIT 1');
   if (!hasProducts) {
     for (const product of productSeeds) {
       await run(
-        `INSERT INTO products (id, name, price, category, image, rating, reviews, description)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO products (
+          id, name, slug, price, category, image, short_description, inventory_count, is_featured, gallery, rating, reviews, description
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           product.id,
           product.name,
+          product.slug,
           product.price,
           product.category,
           product.image,
+          product.shortDescription,
+          product.inventoryCount,
+          product.isFeatured,
+          product.gallery,
           product.rating,
           product.reviews,
           product.description
         ]
       );
     }
+  } else {
+    await run(`UPDATE products SET slug = lower(replace(replace(name, ' ', '-'), '--', '-')) WHERE slug IS NULL OR trim(slug) = ''`);
+    await run(`UPDATE products SET short_description = substr(description, 1, 96) WHERE short_description IS NULL OR trim(short_description) = ''`);
+    await run(`UPDATE products SET inventory_count = 25 WHERE inventory_count IS NULL`);
+    await run(`UPDATE products SET is_featured = 0 WHERE is_featured IS NULL`);
+    await run(`UPDATE products SET gallery = json_array(image) WHERE gallery IS NULL OR trim(gallery) = ''`);
   }
 }

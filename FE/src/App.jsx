@@ -409,6 +409,7 @@ const AdminDashboard = ({
   categories,
   users,
   orders,
+  orderUpdateRequests = [],
   topCategoryLimit,
   onSaveTopCategoryLimit,
   currentUserId,
@@ -417,6 +418,7 @@ const AdminDashboard = ({
   onDeleteUser,
   onUpdateOrder,
   onDeleteOrder,
+  onUpdateOrderUpdateRequest,
   onCreateProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -465,6 +467,9 @@ const AdminDashboard = ({
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategoryFilter, setCatalogCategoryFilter] = useState('all');
   const [catalogSort, setCatalogSort] = useState('id-asc');
+  const [requestSearch, setRequestSearch] = useState('');
+  const [requestStatusFilter, setRequestStatusFilter] = useState('all');
+  const [requestReviewDrafts, setRequestReviewDrafts] = useState({});
   const [appSettingsForm, setAppSettingsForm] = useState({ topCategoryLimit });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
@@ -596,6 +601,37 @@ const AdminDashboard = ({
       }
     });
   }, [products, catalogSearch, catalogCategoryFilter, catalogSort]);
+
+  const visibleOrderUpdateRequests = useMemo(() => {
+    const term = requestSearch.trim().toLowerCase();
+    const scoped = orderUpdateRequests.filter((item) => {
+      const statusMatch = requestStatusFilter === 'all' || String(item.status || '').toLowerCase() === requestStatusFilter;
+      const text = `${item.id || ''} ${item.orderId || ''} ${item.userId || ''} ${item.reason || ''} ${Object.values(item.requestedChanges || {}).join(' ')}`.toLowerCase();
+      return statusMatch && (!term || text.includes(term));
+    });
+
+    return [...scoped].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [orderUpdateRequests, requestSearch, requestStatusFilter]);
+
+  const requestCounts = useMemo(() => {
+    return orderUpdateRequests.reduce(
+      (acc, request) => {
+        acc.total += 1;
+        const status = String(request.status || 'Pending').toLowerCase();
+        if (status === 'pending') acc.pending += 1;
+        if (status === 'approved') acc.approved += 1;
+        if (status === 'rejected') acc.rejected += 1;
+        return acc;
+      },
+      { total: 0, pending: 0, approved: 0, rejected: 0 }
+    );
+  }, [orderUpdateRequests]);
+
+  const formatRequestFieldLabel = (field) =>
+    String(field || '')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (char) => char.toUpperCase())
+      .trim();
 
   // Statistics (computed from live API data)
   const normalizedUsers = useMemo(
@@ -917,6 +953,24 @@ const AdminDashboard = ({
       const message = err.message || 'Failed to create product';
       setCreateProductFeedback({ type: 'error', text: message });
       onNotify?.(message);
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleReviewOrderUpdateRequest = async (request) => {
+    setIsMutating(true);
+    try {
+      const draft = requestReviewDrafts[request.id] || { status: 'Approved', adminNote: '' };
+      await onUpdateOrderUpdateRequest?.(request.id, draft);
+      onNotify?.('Order update request reviewed');
+      setRequestReviewDrafts((prev) => {
+        const next = { ...prev };
+        delete next[request.id];
+        return next;
+      });
+    } catch (err) {
+      onNotify?.(err.message || 'Failed to review order update request');
     } finally {
       setIsMutating(false);
     }
@@ -1540,6 +1594,123 @@ const AdminDashboard = ({
             </div>
           </div>
         );
+      case 'requests':
+        return (
+          <div data-testid="fra-admin-tab-order-requests" className="space-y-6 animate-in fade-in duration-500">
+            <div className="bg-white rounded-[2.5rem] border-2 border-gray-50 shadow-sm p-8">
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-black text-gray-900 tracking-tight uppercase tracking-widest text-xs">Order Update Requests</h3>
+                  <p className="text-sm text-gray-400 mt-2">Review customer changes to shipping and order info.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-3 py-1.5 rounded-full bg-gray-50 text-gray-500 text-[10px] font-black uppercase tracking-widest border border-gray-100">
+                    {requestCounts.total} total
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest border border-amber-100">
+                    {requestCounts.pending} pending
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest border border-emerald-100">
+                    {requestCounts.approved} approved
+                  </span>
+                  <span className="px-3 py-1.5 rounded-full bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest border border-rose-100">
+                    {requestCounts.rejected} rejected
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <input
+                    value={requestSearch}
+                    onChange={(e) => setRequestSearch(e.target.value)}
+                    placeholder="Search requests..."
+                    className="px-4 py-3 bg-gray-50 rounded-2xl text-sm outline-none border border-gray-100"
+                  />
+                  <select
+                    value={requestStatusFilter}
+                    onChange={(e) => setRequestStatusFilter(e.target.value)}
+                    className="px-4 py-3 bg-gray-50 rounded-2xl text-sm outline-none border border-gray-100"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            {visibleOrderUpdateRequests.length ? (
+              <div className="space-y-4">
+                {visibleOrderUpdateRequests.map((request) => (
+                  <div key={request.id} className="bg-white rounded-[2rem] border border-gray-100 shadow-sm p-6">
+                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-lg font-black text-gray-900">Request #{request.id}</h4>
+                          <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase tracking-widest">{request.status}</span>
+                        </div>
+                        <p className="text-sm text-gray-500">Order #{request.orderId} · User {request.userId}</p>
+                        <p className="text-sm text-gray-600">{request.reason || 'No reason provided.'}</p>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {Object.entries(request.requestedChanges || {}).map(([field, value]) => (
+                            <span key={field} className="rounded-full bg-gray-50 px-3 py-1 text-[11px] font-bold text-gray-500 border border-gray-200">
+                              {formatRequestFieldLabel(field)}: {String(value)}
+                            </span>
+                          ))}
+                        </div>
+                        {request.adminNote && <p className="text-xs font-medium text-gray-400">Admin note: {request.adminNote}</p>}
+                      </div>
+                      <div className="space-y-3 min-w-[260px]">
+                        <select
+                          value={(requestReviewDrafts[request.id] || { status: 'Approved' }).status}
+                          onChange={(e) =>
+                            setRequestReviewDrafts((prev) => ({
+                              ...prev,
+                              [request.id]: {
+                                ...(prev[request.id] || { adminNote: '' }),
+                                status: e.target.value
+                              }
+                            }))
+                          }
+                          className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm outline-none border border-gray-100"
+                        >
+                          <option value="Approved">Approve</option>
+                          <option value="Rejected">Reject</option>
+                          <option value="Pending">Reset to Pending</option>
+                        </select>
+                        <textarea
+                          value={(requestReviewDrafts[request.id] || { adminNote: '' }).adminNote}
+                          onChange={(e) =>
+                            setRequestReviewDrafts((prev) => ({
+                              ...prev,
+                              [request.id]: {
+                                ...(prev[request.id] || { status: 'Approved' }),
+                                adminNote: e.target.value
+                              }
+                            }))
+                          }
+                          placeholder="Admin note"
+                          rows={3}
+                          className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm outline-none border border-gray-100 resize-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleReviewOrderUpdateRequest(request)}
+                          disabled={isMutating}
+                          className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white text-xs font-black uppercase tracking-widest hover:bg-indigo-600 disabled:opacity-40"
+                        >
+                          Save Review
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-[2rem] border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">
+                No order update requests found.
+              </div>
+            )}
+          </div>
+        );
       case 'catalog':
         return (
           <div data-testid="fra-admin-tab-catalog" className="bg-white rounded-[2.5rem] border-2 border-gray-50 shadow-sm overflow-hidden animate-in fade-in duration-500">
@@ -1748,6 +1919,7 @@ const AdminDashboard = ({
             { id: 'data-manager', label: 'Data Manager', icon: <Package size={20} /> },
             { id: 'app-settings', label: 'App Settings', icon: <Settings size={20} /> },
             { id: 'catalog', label: 'Catalog', icon: <Package size={20} /> },
+            { id: 'requests', label: 'Requests', icon: <Clock size={20} /> },
             { id: 'users', label: 'Users', icon: <UsersIcon size={20} /> },
             { id: 'orders', label: 'Orders', icon: <ShoppingBag size={20} /> },
           ].map((item) => (
@@ -2110,8 +2282,8 @@ const AdminDashboard = ({
 
 // --- Main App Logic ---
 
-export default function App() {
-  const [currentPage, setCurrentPage] = useState('home');
+export default function App({ initialPage = 'home', embedded = false }) {
+  const [currentPage, setCurrentPage] = useState(initialPage);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [users, setUsers] = useState([]);
@@ -2121,6 +2293,8 @@ export default function App() {
   const [cart, setCart] = useState([]);
   const [user, setUser] = useState(null);
   const [userOrders, setUserOrders] = useState([]);
+  const [orderUpdateRequests, setOrderUpdateRequests] = useState([]);
+  const [adminOrderUpdateRequests, setAdminOrderUpdateRequests] = useState([]);
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('lumina_access_token') || '');
   const [recoveryTokens, setRecoveryTokens] = useState(null);
   const [toast, setToast] = useState(null);
@@ -2217,12 +2391,14 @@ export default function App() {
 
   const fetchAdminData = async (token = authToken) => {
     if (!token) return;
-    const [usersData, ordersData] = await Promise.all([
+    const [usersData, ordersData, requestData] = await Promise.all([
       apiRequest('/admin/users', { token }),
-      apiRequest('/admin/orders', { token })
+      apiRequest('/admin/orders', { token }),
+      apiRequest('/admin/order-update-requests', { token })
     ]);
     setUsers(usersData.items || []);
     setOrders(ordersData.items || []);
+    setAdminOrderUpdateRequests(requestData.items || []);
   };
 
   const fetchCatalogData = async () => {
@@ -2253,10 +2429,16 @@ export default function App() {
     setUserOrders(data.items || []);
   };
 
+  const fetchOrderUpdateRequests = async (token = authToken) => {
+    if (!token) return;
+    const data = await apiRequest('/order-update-requests', { token });
+    setOrderUpdateRequests(data.items || []);
+  };
+
   const refreshAllData = async (token = authToken) => {
     await Promise.all([fetchCatalogData(), fetchStorefrontSettings()]);
     if (token) {
-      await Promise.all([fetchCartData(token), fetchUserOrders(token)]);
+      await Promise.all([fetchCartData(token), fetchUserOrders(token), fetchOrderUpdateRequests(token)]);
       if (user?.role === 'Admin') {
         await fetchAdminData(token);
       }
@@ -2293,7 +2475,7 @@ export default function App() {
       try {
         const me = await apiRequest('/auth/me', { token: authToken });
         setUser(me.user);
-        await Promise.all([fetchCartData(authToken), fetchUserOrders(authToken)]);
+        await Promise.all([fetchCartData(authToken), fetchUserOrders(authToken), fetchOrderUpdateRequests(authToken)]);
       } catch (_err) {
         localStorage.removeItem('lumina_access_token');
         setAuthToken('');
@@ -2375,6 +2557,8 @@ export default function App() {
     setUsers([]);
     setOrders([]);
     setUserOrders([]);
+    setOrderUpdateRequests([]);
+    setAdminOrderUpdateRequests([]);
     setCart([]);
     navigateTo('home');
   };
@@ -2398,7 +2582,7 @@ export default function App() {
     localStorage.setItem('lumina_access_token', token);
     setAuthToken(token);
     setUser(data.user);
-    await Promise.all([fetchCartData(token), fetchUserOrders(token)]);
+    await Promise.all([fetchCartData(token), fetchUserOrders(token), fetchOrderUpdateRequests(token)]);
     setToast(isLogin ? 'Logged in successfully' : 'Account created');
     navigateTo('home');
   };
@@ -2424,6 +2608,26 @@ export default function App() {
       body: { oldPassword, newPassword }
     });
     setToast('Password updated');
+  };
+
+  const handleAccountUpdate = async (payload) => {
+    const data = await apiRequest('/auth/me', {
+      method: 'PATCH',
+      body: payload
+    });
+    setUser(data.user);
+    setToast('Account info updated');
+    return data.user;
+  };
+
+  const handleOrderUpdateRequestCreate = async (orderId, payload) => {
+    const data = await apiRequest(`/orders/${encodeURIComponent(orderId)}/update-request`, {
+      method: 'POST',
+      body: payload
+    });
+    await fetchOrderUpdateRequests();
+    setToast('Order update request submitted');
+    return data.request;
   };
 
   const handlePasswordResetConfirm = async ({ accessToken, refreshToken, password }) => {
@@ -2465,6 +2669,14 @@ export default function App() {
   const handleAdminOrderDelete = async (orderId) => {
     await apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
     setOrders((prev) => prev.filter((item) => item.id !== orderId));
+  };
+
+  const handleAdminOrderUpdateRequest = async (requestId, updates) => {
+    const data = await apiRequest(`/admin/order-update-requests/${requestId}`, {
+      method: 'PATCH',
+      body: updates
+    });
+    setAdminOrderUpdateRequests((prev) => prev.map((item) => (item.id === requestId ? data.request : item)));
   };
 
   const handleAdminProductCreate = async (payload) => {
@@ -2532,7 +2744,7 @@ export default function App() {
 
     try {
       await apiRequest('/orders/checkout', { method: 'POST', body: { paymentMethod: 'card' } });
-      await Promise.all([fetchCartData(), fetchUserOrders()]);
+      await Promise.all([fetchCartData(), fetchUserOrders(), fetchOrderUpdateRequests()]);
       setToast('Order placed successfully');
       if (user?.role === 'Admin') {
         await fetchAdminData();
@@ -2553,6 +2765,7 @@ export default function App() {
           categories={categories}
           users={users}
           orders={orders}
+          orderUpdateRequests={adminOrderUpdateRequests}
           topCategoryLimit={topCategoryLimit}
           onSaveTopCategoryLimit={handleTopCategoryLimitSave}
           currentUserId={user?.id}
@@ -2561,6 +2774,7 @@ export default function App() {
           onDeleteUser={handleAdminUserDelete}
           onUpdateOrder={handleAdminOrderUpdate}
           onDeleteOrder={handleAdminOrderDelete}
+          onUpdateOrderUpdateRequest={handleAdminOrderUpdateRequest}
           onCreateProduct={handleAdminProductCreate}
           onUpdateProduct={handleAdminProductUpdate}
           onDeleteProduct={handleAdminProductDelete}
@@ -2596,8 +2810,11 @@ export default function App() {
         <Profile
           user={user}
           orders={userOrders}
+          orderUpdateRequests={orderUpdateRequests}
           onLogout={handleLogout}
+          onSaveAccountInfo={handleAccountUpdate}
           onChangePassword={handleProfilePasswordChange}
+          onRequestOrderUpdate={handleOrderUpdateRequestCreate}
         />
       );
       case 'checkout': return <Checkout cart={cart} onComplete={handleOrderComplete} onNavigate={navigateTo} />;
@@ -2635,21 +2852,25 @@ export default function App() {
 
   return (
     <div data-testid="fra-app-root" className="min-h-screen bg-white text-gray-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
-      <Navbar 
-        cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)} 
-        onNavigate={navigateTo} 
-        currentPage={currentPage}
-        user={user}
-        onLogout={handleLogout}
-      />
-      <main data-testid="fra-app-content" className="pt-16 min-h-[calc(100vh-64px)]">{renderContent()}</main>
+      {!embedded ? (
+        <Navbar
+          cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
+          onNavigate={navigateTo}
+          currentPage={currentPage}
+          user={user}
+          onLogout={handleLogout}
+        />
+      ) : null}
+      <main data-testid="fra-app-content" className={embedded ? 'min-h-screen' : 'pt-16 min-h-[calc(100vh-64px)]'}>
+        {renderContent()}
+      </main>
       {toast && (
         <div data-testid="fra-app-toast" className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900/90 backdrop-blur-md text-white px-8 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-12 z-[300] border border-white/10">
           <div className="bg-green-500 p-1.5 rounded-full"><CheckCircle size={16} /></div>
           <span data-testid="txt-app-toast-message" className="text-xs font-black uppercase tracking-widest">{toast}</span>
         </div>
       )}
-      <Footer />
+      {!embedded ? <Footer /> : null}
     </div>
   );
 }
@@ -2708,13 +2929,101 @@ const Cart = ({ cart, onUpdateQty, onRemove, onCheckout, onNavigate }) => {
   );
 };
 
-const Profile = ({ user, orders, onLogout, onChangePassword }) => {
+const Profile = ({ user, orders = [], orderUpdateRequests = [], onLogout, onChangePassword, onSaveAccountInfo, onRequestOrderUpdate }) => {
+  const buildAccountForm = (currentUser) => ({
+    name: currentUser?.name || '',
+    email: currentUser?.email || '',
+    phone: currentUser?.phone || '',
+    addressLine1: currentUser?.addressLine1 || '',
+    addressLine2: currentUser?.addressLine2 || '',
+    addressCity: currentUser?.addressCity || '',
+    addressState: currentUser?.addressState || '',
+    addressPostalCode: currentUser?.addressPostalCode || ''
+  });
+
+  const buildRequestForm = (currentOrder) => ({
+    shippingRecipient: currentOrder?.shippingDetails?.recipient || user?.name || '',
+    shippingPhone: currentOrder?.shippingDetails?.phone || user?.phone || '',
+    shippingAddressLine1: currentOrder?.shippingDetails?.addressLine1 || user?.addressLine1 || '',
+    shippingAddressLine2: currentOrder?.shippingDetails?.addressLine2 || user?.addressLine2 || '',
+    shippingCity: currentOrder?.shippingDetails?.city || user?.addressCity || '',
+    shippingState: currentOrder?.shippingDetails?.state || user?.addressState || '',
+    shippingPostalCode: currentOrder?.shippingDetails?.postalCode || user?.addressPostalCode || '',
+    reason: ''
+  });
+
+  const [accountForm, setAccountForm] = useState(() => buildAccountForm(user));
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [accountMessage, setAccountMessage] = useState('');
+  const [accountError, setAccountError] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [requestForm, setRequestForm] = useState(() => buildRequestForm(null));
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [requestError, setRequestError] = useState('');
+
+  useEffect(() => {
+    setAccountForm(buildAccountForm(user));
+  }, [user]);
+
+  useEffect(() => {
+    if (!selectedOrder) return;
+    setRequestForm(buildRequestForm(selectedOrder));
+  }, [selectedOrder, user]);
+
+  const latestRequestsByOrder = useMemo(() => {
+    const map = new Map();
+    (orderUpdateRequests || []).forEach((request) => {
+      if (!map.has(request.orderId)) {
+        map.set(request.orderId, request);
+      }
+    });
+    return map;
+  }, [orderUpdateRequests]);
+
+  const formatChangeLabel = (field) =>
+    String(field || '')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (char) => char.toUpperCase())
+      .trim();
+
+  const handleAccountSubmit = async (e) => {
+    e.preventDefault();
+    setAccountMessage('');
+    setAccountError('');
+
+    if (!accountForm.name.trim() || !accountForm.email.trim()) {
+      setAccountError('Name and email are required.');
+      return;
+    }
+
+    setIsSavingAccount(true);
+    try {
+      const updatedUser = await onSaveAccountInfo({
+        name: accountForm.name.trim(),
+        email: accountForm.email.trim(),
+        phone: accountForm.phone.trim(),
+        addressLine1: accountForm.addressLine1.trim(),
+        addressLine2: accountForm.addressLine2.trim(),
+        addressCity: accountForm.addressCity.trim(),
+        addressState: accountForm.addressState.trim(),
+        addressPostalCode: accountForm.addressPostalCode.trim()
+      });
+      if (updatedUser) {
+        setAccountForm(buildAccountForm(updatedUser));
+      }
+      setAccountMessage('Account info saved.');
+    } catch (err) {
+      setAccountError(err.message || 'Failed to update account info');
+    } finally {
+      setIsSavingAccount(false);
+    }
+  };
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
@@ -2748,31 +3057,184 @@ const Profile = ({ user, orders, onLogout, onChangePassword }) => {
     }
   };
 
+  const openRequestModal = (order) => {
+    setSelectedOrder(order);
+    setRequestError('');
+    setRequestForm(buildRequestForm(order));
+  };
+
+  const closeRequestModal = () => {
+    setSelectedOrder(null);
+    setRequestError('');
+  };
+
+  const handleRequestSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedOrder) return;
+    setRequestError('');
+
+    const requestedChanges = {
+      shippingRecipient: requestForm.shippingRecipient.trim(),
+      shippingPhone: requestForm.shippingPhone.trim(),
+      shippingAddressLine1: requestForm.shippingAddressLine1.trim(),
+      shippingAddressLine2: requestForm.shippingAddressLine2.trim(),
+      shippingCity: requestForm.shippingCity.trim(),
+      shippingState: requestForm.shippingState.trim(),
+      shippingPostalCode: requestForm.shippingPostalCode.trim()
+    };
+
+    if (!Object.values(requestedChanges).some(Boolean)) {
+      setRequestError('Add at least one order detail to request an update.');
+      return;
+    }
+
+    setIsSubmittingRequest(true);
+    try {
+      await onRequestOrderUpdate(selectedOrder.id, {
+        reason: requestForm.reason.trim(),
+        requestedChanges
+      });
+      setSelectedOrder(null);
+    } catch (err) {
+      setRequestError(err.message || 'Failed to submit request');
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
+
   return (
-    <div data-testid="fra-profile-main" className="max-w-4xl mx-auto px-4 py-16 animate-in slide-in-from-bottom-8">
+    <div data-testid="fra-profile-main" className="max-w-6xl mx-auto px-4 py-16 animate-in slide-in-from-bottom-8">
       <div className="bg-white rounded-[3rem] border-2 border-gray-50 shadow-2xl overflow-hidden">
         <div className="bg-gradient-to-r from-indigo-600 to-violet-600 h-48 relative">
-          <div className="absolute -bottom-16 left-12 w-32 h-32 rounded-[2.5rem] bg-white p-1.5 shadow-xl"><div className="w-full h-full rounded-[2rem] bg-indigo-50 flex items-center justify-center text-indigo-600"><User size={48} /></div></div>
+          <div className="absolute -bottom-16 left-12 w-32 h-32 rounded-[2.5rem] bg-white p-1.5 shadow-xl">
+            <div className="w-full h-full rounded-[2rem] bg-indigo-50 flex items-center justify-center text-indigo-600">
+              <User size={48} />
+            </div>
+          </div>
         </div>
-        <div className="pt-20 px-12 pb-12">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b border-gray-100 pb-12 mb-12">
+        <div className="pt-20 px-8 md:px-12 pb-12 space-y-10">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-gray-100 pb-10">
             <div>
               <h1 data-testid="txt-profile-name" className="text-4xl font-black text-gray-900 tracking-tight">{user?.name}</h1>
               <p data-testid="txt-profile-email" className="text-gray-500 font-medium">{user?.email}</p>
-              <span data-testid="txt-profile-role" className="inline-block mt-2 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-full uppercase tracking-widest">{user?.role}</span>
+              <span data-testid="txt-profile-role" className="inline-block mt-3 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-full uppercase tracking-widest">{user?.role}</span>
             </div>
-            <button data-testid="btn-profile-sign-out" onClick={onLogout} className="px-6 py-3 bg-red-50 rounded-2xl font-bold text-red-600 hover:bg-red-100 flex items-center gap-2"><LogOut size={18} /> Sign Out</button>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-500">
+                {orders?.length || 0} orders
+              </div>
+              <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-500">
+                ${Number(user?.totalSpent || 0).toFixed(2)} spent
+              </div>
+              <button data-testid="btn-profile-sign-out" onClick={onLogout} className="px-6 py-3 bg-red-50 rounded-2xl font-bold text-red-600 hover:bg-red-100 flex items-center gap-2">
+                <LogOut size={18} /> Sign Out
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner">
-              <h3 data-testid="txt-profile-orders-title" className="text-xl font-bold mb-4">Orders</h3>
-              <p data-testid="txt-profile-orders-summary" className="text-sm text-gray-400">
-                {orders?.length ? `${orders.length} order(s) in history` : 'No orders yet'}
-              </p>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-8">
+            <div className="bg-gray-50 rounded-[2.5rem] p-8 shadow-inner space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 data-testid="txt-profile-account-title" className="text-2xl font-black text-gray-900">Account Info</h3>
+                  <p data-testid="txt-profile-account-description" className="text-sm text-gray-400 mt-1">
+                    Update your own profile details.
+                  </p>
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400">Customer</span>
+              </div>
+              <form data-testid="frm-profile-account-info" onSubmit={handleAccountSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    data-testid="txt-profile-account-name"
+                    type="text"
+                    placeholder="Full name"
+                    value={accountForm.name}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, name: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                  <input
+                    data-testid="txt-profile-account-email"
+                    type="email"
+                    placeholder="Email address"
+                    value={accountForm.email}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, email: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    data-testid="txt-profile-account-phone"
+                    type="text"
+                    placeholder="Phone number"
+                    value={accountForm.phone}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, phone: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                  <input
+                    data-testid="txt-profile-account-address-line1"
+                    type="text"
+                    placeholder="Address line 1"
+                    value={accountForm.addressLine1}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                </div>
+                <input
+                  data-testid="txt-profile-account-address-line2"
+                  type="text"
+                  placeholder="Address line 2"
+                  value={accountForm.addressLine2}
+                  onChange={(e) => setAccountForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
+                  className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input
+                    data-testid="txt-profile-account-city"
+                    type="text"
+                    placeholder="City"
+                    value={accountForm.addressCity}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, addressCity: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                  <input
+                    data-testid="txt-profile-account-state"
+                    type="text"
+                    placeholder="State / Province"
+                    value={accountForm.addressState}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, addressState: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                  <input
+                    data-testid="txt-profile-account-postal-code"
+                    type="text"
+                    placeholder="Postal code"
+                    value={accountForm.addressPostalCode}
+                    onChange={(e) => setAccountForm((prev) => ({ ...prev, addressPostalCode: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    data-testid="btn-profile-account-save"
+                    type="submit"
+                    disabled={isSavingAccount}
+                    className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+                  >
+                    {isSavingAccount ? 'Saving...' : 'Save Account Info'}
+                  </button>
+                  <p className="text-xs text-gray-400 font-medium">Your changes are limited to your own account.</p>
+                </div>
+              </form>
+              {accountMessage && <p data-testid="txt-profile-account-success" className="text-xs font-bold text-emerald-600">{accountMessage}</p>}
+              {accountError && <p data-testid="txt-profile-account-error" className="text-xs font-bold text-rose-500">{accountError}</p>}
             </div>
-            <div className="bg-gray-50 rounded-[2rem] p-8 shadow-inner space-y-3">
-              <h3 data-testid="txt-profile-settings-title" className="text-xl font-bold">Settings</h3>
-              <p data-testid="txt-profile-settings-description" className="text-sm text-gray-400">Change your password</p>
+
+            <div className="bg-gray-50 rounded-[2.5rem] p-8 shadow-inner space-y-6">
+              <div>
+                <h3 data-testid="txt-profile-settings-title" className="text-2xl font-black">Security</h3>
+                <p data-testid="txt-profile-settings-description" className="text-sm text-gray-400 mt-1">Change your password.</p>
+              </div>
               <form data-testid="frm-profile-change-password" onSubmit={handlePasswordChange} className="space-y-3">
                 <input
                   data-testid="txt-profile-old-password"
@@ -2811,8 +3273,185 @@ const Profile = ({ user, orders, onLogout, onChangePassword }) => {
               {passwordError && <p data-testid="txt-profile-password-error" className="text-xs font-bold text-rose-500">{passwordError}</p>}
             </div>
           </div>
+
+          <div className="bg-gray-50 rounded-[2.5rem] p-8 shadow-inner space-y-6">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div>
+                <h3 data-testid="txt-profile-orders-title" className="text-2xl font-black text-gray-900">Orders</h3>
+                <p data-testid="txt-profile-orders-summary" className="text-sm text-gray-400 mt-1">
+                  {orders?.length ? `${orders.length} order(s) in history` : 'No orders yet'}
+                </p>
+              </div>
+              <p className="text-xs font-black uppercase tracking-[0.25em] text-gray-400">Update requests live here too</p>
+            </div>
+
+            {orders?.length ? (
+              <div className="space-y-4">
+                {orders.map((order) => {
+                  const latestRequest = latestRequestsByOrder.get(order.id);
+                  const shippingDetails = order.shippingDetails || {};
+                  const shippingLines = [
+                    shippingDetails.recipient,
+                    shippingDetails.addressLine1,
+                    shippingDetails.addressLine2,
+                    [shippingDetails.city, shippingDetails.state, shippingDetails.postalCode].filter(Boolean).join(', ')
+                  ].filter(Boolean);
+                  const orderLabel = `#ORD-${String(order.id).padStart(4, '0')}`;
+                  const requestDisabled = latestRequest?.status === 'Pending';
+                  return (
+                    <div key={order.id} data-testid={`fra-profile-order-${toKebab(order.id)}`} className="rounded-[2rem] bg-white border border-gray-100 p-6 shadow-sm">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h4 data-testid={`txt-profile-order-id-${toKebab(order.id)}`} className="text-xl font-black text-gray-900">{orderLabel}</h4>
+                            <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase tracking-widest">
+                              {order.status}
+                            </span>
+                            {latestRequest && (
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${latestRequest.status === 'Pending' ? 'bg-amber-50 text-amber-700' : latestRequest.status === 'Rejected' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                Request {latestRequest.status}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-2 text-sm text-gray-500">
+                            Placed {order.createdAt ? formatShortDate(order.createdAt) : 'recently'} · ${Number(order.total || 0).toFixed(2)}
+                          </p>
+                          {shippingLines.length > 0 && (
+                            <p className="mt-2 text-sm text-gray-400">
+                              {shippingLines.join(' · ')}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`btn-profile-order-request-${toKebab(order.id)}`}
+                          onClick={() => openRequestModal(order)}
+                          disabled={requestDisabled}
+                          className="px-5 py-3 rounded-2xl bg-gray-900 text-white text-xs font-black uppercase tracking-widest hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {requestDisabled ? 'Request Pending' : 'Request Order Update'}
+                        </button>
+                      </div>
+
+                      {latestRequest && (
+                        <div className="mt-5 rounded-[1.5rem] border border-gray-100 bg-gray-50 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs font-black uppercase tracking-[0.25em] text-gray-400">Latest update request</p>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">{latestRequest.status}</span>
+                          </div>
+                          <p className="mt-2 text-sm text-gray-600">{latestRequest.reason || 'No reason provided.'}</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {Object.entries(latestRequest.requestedChanges || {}).map(([field, value]) => (
+                              <span key={field} className="rounded-full bg-white px-3 py-1 text-[11px] font-bold text-gray-500 border border-gray-200">
+                                {formatChangeLabel(field)}: {String(value)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-[2rem] border border-dashed border-gray-200 bg-white p-8 text-center">
+                <p className="text-sm text-gray-400">No orders yet. Once you check out, they’ll appear here with request options.</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={Boolean(selectedOrder)}
+        onClose={closeRequestModal}
+        title={selectedOrder ? `Update #ORD-${String(selectedOrder.id).padStart(4, '0')}` : 'Order Update'}
+      >
+        {selectedOrder && (
+          <form onSubmit={handleRequestSubmit} className="space-y-4">
+            <p className="text-sm text-gray-500 leading-relaxed">
+              Request a review for shipping or order information changes. The order itself is not edited directly here.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input
+                type="text"
+                placeholder="Recipient"
+                value={requestForm.shippingRecipient}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingRecipient: e.target.value }))}
+                className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Phone"
+                value={requestForm.shippingPhone}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingPhone: e.target.value }))}
+                className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+              />
+            </div>
+            <input
+              type="text"
+              placeholder="Address line 1"
+              value={requestForm.shippingAddressLine1}
+              onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingAddressLine1: e.target.value }))}
+              className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+            />
+            <input
+              type="text"
+              placeholder="Address line 2"
+              value={requestForm.shippingAddressLine2}
+              onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingAddressLine2: e.target.value }))}
+              className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                placeholder="City"
+                value={requestForm.shippingCity}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingCity: e.target.value }))}
+                className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="State"
+                value={requestForm.shippingState}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingState: e.target.value }))}
+                className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Postal code"
+                value={requestForm.shippingPostalCode}
+                onChange={(e) => setRequestForm((prev) => ({ ...prev, shippingPostalCode: e.target.value }))}
+                className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm"
+              />
+            </div>
+            <textarea
+              placeholder="Reason for update"
+              value={requestForm.reason}
+              onChange={(e) => setRequestForm((prev) => ({ ...prev, reason: e.target.value }))}
+              rows={4}
+              className="w-full px-4 py-3 bg-white rounded-xl outline-none border border-gray-200 text-sm resize-none"
+            />
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={isSubmittingRequest}
+                className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {isSubmittingRequest ? 'Submitting...' : 'Submit Request'}
+              </button>
+              <button
+                type="button"
+                onClick={closeRequestModal}
+                className="px-5 py-3 bg-white text-gray-700 rounded-2xl text-xs font-black uppercase tracking-widest border border-gray-200 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+            {requestError && <p className="text-xs font-bold text-rose-500">{requestError}</p>}
+          </form>
+        )}
+      </Modal>
     </div>
   );
 };

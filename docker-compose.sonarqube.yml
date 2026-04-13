@@ -1,0 +1,29 @@
+services:
+  sonarqube:
+    image: sonarqube:community
+    container_name: lumina-sonarqube
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+
+  scanner:
+    image: sonarsource/sonar-scanner-cli:latest
+    depends_on:
+      - sonarqube
+    environment:
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+    volumes:
+      - .:/usr/src
+    working_dir: /usr/src
+    command:
+      - /bin/sh
+      - -c
+      - test -n "$$SONAR_TOKEN" || { echo "Set SONAR_TOKEN before running npm run sonar:scan."; exit 1; }; sonar-scanner -Dsonar.host.url=http://sonarqube:9000 -Dsonar.token=$$SONAR_TOKEN
+
+volumes:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:

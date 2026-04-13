@@ -174,6 +174,17 @@ const FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Riley', 'Casey', 'Av
 const LAST_NAMES = ['Nguyen', 'Tran', 'Pham', 'Le', 'Hoang', 'Vo', 'Do', 'Bui', 'Dang', 'Huynh'];
 const DEFAULT_TOP_CATEGORY_LIMIT = 3;
 const TOP_CATEGORY_LIMIT_KEY = 'homepage_top_categories_limit';
+const PROFILE_SELECT_COLUMNS =
+  'id,name,email,phone,address_line1,address_line2,address_city,address_state,address_postal_code,role,status,created_at';
+const ORDER_UPDATE_REQUEST_ALLOWED_FIELDS = [
+  'shippingRecipient',
+  'shippingPhone',
+  'shippingAddressLine1',
+  'shippingAddressLine2',
+  'shippingCity',
+  'shippingState',
+  'shippingPostalCode'
+];
 
 function readEnv(...keys: string[]) {
   for (const key of keys) {
@@ -335,6 +346,69 @@ function parseProductId(raw: string) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : NaN;
 }
 
+function normalizeOptionalText(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function mapProfileRecord(profile: Record<string, any> | null | undefined, fallback: UserContext, stats: { orderCount?: number; totalSpent?: number } = {}) {
+  return {
+    id: profile?.id || fallback.id,
+    name: profile?.name || fallback.email.split('@')[0],
+    email: profile?.email || fallback.email,
+    phone: profile?.phone || '',
+    addressLine1: profile?.address_line1 || '',
+    addressLine2: profile?.address_line2 || '',
+    addressCity: profile?.address_city || '',
+    addressState: profile?.address_state || '',
+    addressPostalCode: profile?.address_postal_code || '',
+    role: profile?.role || fallback.role,
+    status: profile?.status || 'Active',
+    joined: formatShortDate(profile?.created_at),
+    orderCount: stats.orderCount ?? 0,
+    totalSpent: stats.totalSpent ?? 0
+  };
+}
+
+function mapOrderUpdateRequestRecord(request: Record<string, any>) {
+  return {
+    id: request.id,
+    orderId: request.order_id,
+    userId: request.user_id,
+    requestedChanges: request.requested_changes || request.requestedChanges || {},
+    reason: request.reason || '',
+    status: request.status || 'Pending',
+    adminNote: request.admin_note || '',
+    reviewedBy: request.reviewed_by || null,
+    reviewedAt: request.reviewed_at || null,
+    createdAt: request.created_at || null
+  };
+}
+
+function mapOrderRecord(order: Record<string, any>, items: Array<Record<string, any>> = []) {
+  return {
+    id: order.id,
+    subtotal: Number(order.subtotal),
+    shipping: Number(order.shipping),
+    total: Number(order.total),
+    status: order.status,
+    paymentMethod: order.payment_method || order.paymentMethod || 'card',
+    createdAt: order.created_at || order.createdAt,
+    shippingAddress: order.shipping_address || order.shippingAddress || order.shipping_address_line1 || '',
+    shippingDetails: {
+      recipient: order.shipping_recipient || '',
+      phone: order.shipping_phone || '',
+      addressLine1: order.shipping_address_line1 || '',
+      addressLine2: order.shipping_address_line2 || '',
+      city: order.shipping_city || '',
+      state: order.shipping_state || '',
+      postalCode: order.shipping_postal_code || ''
+    },
+    items
+  };
+}
+
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -367,6 +441,21 @@ function normalizeTargetSet(payload: any): Set<string> {
   }
 
   return set;
+}
+
+function collectOrderUpdateChanges(body: Record<string, any>) {
+  const requestedChanges: Record<string, string> = {};
+
+  for (const field of ORDER_UPDATE_REQUEST_ALLOWED_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      const value = normalizeOptionalText(body[field]);
+      if (value) {
+        requestedChanges[field] = value;
+      }
+    }
+  }
+
+  return requestedChanges;
 }
 
 function randomFrom<T>(items: T[]) {
@@ -741,7 +830,7 @@ async function handleRequest(req: Request) {
           if (!loginError && loginData.user) {
             const profileResult = await adminClient
               .from('profiles')
-              .select('id,name,email,role,status,created_at')
+              .select(PROFILE_SELECT_COLUMNS)
               .eq('id', loginData.user.id)
               .maybeSingle();
 
@@ -768,7 +857,7 @@ async function handleRequest(req: Request) {
       if (createdData.user?.id) {
         const profileResult = await adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', createdData.user.id)
           .maybeSingle();
         profile = profileResult.data;
@@ -796,7 +885,7 @@ async function handleRequest(req: Request) {
       if (data.user?.id) {
         const profileResult = await adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', data.user.id)
           .maybeSingle();
         profile = profileResult.data;
@@ -904,7 +993,7 @@ async function handleRequest(req: Request) {
       const [{ data: profile }, { data: orders }] = await Promise.all([
         adminClient
           .from('profiles')
-          .select('id,name,email,role,status,created_at')
+          .select(PROFILE_SELECT_COLUMNS)
           .eq('id', user.id)
           .maybeSingle(),
         adminClient.from('orders').select('id,total').eq('user_id', user.id)
@@ -914,16 +1003,121 @@ async function handleRequest(req: Request) {
       const totalSpent = (orders || []).reduce((sum: number, o: any) => sum + Number(o.total), 0);
 
       return response(200, {
-        user: {
-          id: user.id,
-          name: profile?.name || user.email.split('@')[0],
-          email: profile?.email || user.email,
-          role: profile?.role || user.role,
-          status: profile?.status || 'Active',
-          joined: formatShortDate(profile?.created_at),
-          orderCount,
-          totalSpent
+        user: mapProfileRecord(profile, user, { orderCount, totalSpent })
+      });
+    }
+
+    if (path === '/auth/me' && req.method === 'PATCH') {
+      const user = await getUserFromAuth(req);
+      const body = await readJson(req);
+      const { data: currentProfile, error: currentProfileError } = await adminClient
+        .from('profiles')
+        .select(PROFILE_SELECT_COLUMNS)
+        .eq('id', user.id)
+        .maybeSingle();
+      if (currentProfileError) throw currentProfileError;
+      if (!currentProfile) return response(404, { error: 'Profile not found' });
+
+      const profileUpdates: Record<string, string | null> = {};
+      const name = normalizeOptionalText(body.name);
+      const rawEmail = normalizeOptionalText(body.email);
+      const email = typeof rawEmail === 'string' ? rawEmail.toLowerCase() : rawEmail;
+      const phone = normalizeOptionalText(body.phone);
+      const addressLine1 = normalizeOptionalText(body.addressLine1);
+      const addressLine2 = normalizeOptionalText(body.addressLine2);
+      const addressCity = normalizeOptionalText(body.addressCity);
+      const addressState = normalizeOptionalText(body.addressState);
+      const addressPostalCode = normalizeOptionalText(body.addressPostalCode);
+      let emailChanged = false;
+
+      if (name !== undefined) {
+        if (!name) {
+          return response(400, { error: 'name cannot be empty' });
         }
+        profileUpdates.name = name;
+      }
+
+      if (email !== undefined) {
+        if (!email) {
+          return response(400, { error: 'email cannot be empty' });
+        }
+
+        if (email !== String(currentProfile.email || '').toLowerCase()) {
+          const { data: existingEmailOwner, error: emailLookupError } = await adminClient
+            .from('profiles')
+            .select('id')
+            .eq('email', email)
+            .neq('id', user.id)
+            .maybeSingle();
+          if (emailLookupError) throw emailLookupError;
+          if (existingEmailOwner) {
+            return response(409, { error: 'Email is already in use' });
+          }
+
+          const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(user.id, {
+            email
+          });
+          if (authUpdateError) {
+            return response(400, { error: authUpdateError.message });
+          }
+
+          emailChanged = true;
+        }
+
+        profileUpdates.email = email;
+      }
+
+      if (phone !== undefined) profileUpdates.phone = phone;
+      if (addressLine1 !== undefined) profileUpdates.address_line1 = addressLine1;
+      if (addressLine2 !== undefined) profileUpdates.address_line2 = addressLine2;
+      if (addressCity !== undefined) profileUpdates.address_city = addressCity;
+      if (addressState !== undefined) profileUpdates.address_state = addressState;
+      if (addressPostalCode !== undefined) profileUpdates.address_postal_code = addressPostalCode;
+
+      if (Object.keys(profileUpdates).length === 0) {
+        return response(400, { error: 'No valid fields to update' });
+      }
+
+      const { data: updatedProfile, error: updateError } = await adminClient
+        .from('profiles')
+        .update(profileUpdates)
+        .eq('id', user.id)
+        .select(PROFILE_SELECT_COLUMNS)
+        .maybeSingle();
+
+      if (updateError) {
+        if (emailChanged) {
+          await adminClient.auth.admin.updateUserById(user.id, {
+            email: String(currentProfile.email || user.email)
+          }).catch(() => null);
+        }
+        throw updateError;
+      }
+
+      const [{ data: orderTotals }, { data: orderIds }] = await Promise.all([
+        adminClient.from('orders').select('total').eq('user_id', user.id),
+        adminClient.from('orders').select('id').eq('user_id', user.id)
+      ]);
+      const totalSpent = (orderTotals || []).reduce((sum: number, order: any) => sum + Number(order.total), 0);
+      const orderCount = (orderIds || []).length;
+
+      return response(200, {
+        user: mapProfileRecord(updatedProfile, user, { orderCount, totalSpent })
+      });
+    }
+
+    if (path === '/order-update-requests' && req.method === 'GET') {
+      const user = await getUserFromAuth(req);
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      return response(200, {
+        items: (data || []).map((request: any) => mapOrderUpdateRequestRecord(request)),
+        count: (data || []).length
       });
     }
 
@@ -1046,11 +1240,68 @@ async function handleRequest(req: Request) {
       return response(201, { order: data });
     }
 
+    if (path.startsWith('/orders/') && path.endsWith('/update-request') && req.method === 'POST') {
+      const user = await getUserFromAuth(req);
+      const orderId = Number(path.split('/')[2]);
+      const body = await readJson(req);
+      const reason = normalizeOptionalText(body.reason) || '';
+      const requestedChanges = collectOrderUpdateChanges(
+        body.requestedChanges && typeof body.requestedChanges === 'object' ? body.requestedChanges : body
+      );
+
+      if (!Number.isInteger(orderId) || orderId < 1) {
+        return response(400, { error: 'Invalid order id' });
+      }
+
+      if (Object.keys(requestedChanges).length === 0) {
+        return response(400, { error: 'At least one order update field is required' });
+      }
+
+      const { data: order, error: orderError } = await adminClient
+        .from('orders')
+        .select('id,status')
+        .eq('id', orderId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!order) return response(404, { error: 'Order not found' });
+      if (String(order.status || '').toLowerCase() === 'cancelled') {
+        return response(400, { error: 'Cancelled orders cannot be updated' });
+      }
+
+      const { data: existingPending, error: pendingError } = await adminClient
+        .from('order_update_requests')
+        .select('id')
+        .eq('order_id', orderId)
+        .eq('user_id', user.id)
+        .eq('status', 'Pending')
+        .maybeSingle();
+      if (pendingError) throw pendingError;
+      if (existingPending) {
+        return response(409, { error: 'A pending update request already exists for this order' });
+      }
+
+      const { data: request, error } = await adminClient
+        .from('order_update_requests')
+        .insert({
+          order_id: orderId,
+          user_id: user.id,
+          requested_changes: requestedChanges,
+          reason,
+          status: 'Pending'
+        })
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .maybeSingle();
+      if (error) throw error;
+
+      return response(201, { request: mapOrderUpdateRequestRecord(request as Record<string, any>) });
+    }
+
     if (path === '/admin/users' && req.method === 'GET') {
       await requireAdmin(req);
       const { data, error } = await adminClient
         .from('profiles')
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -1064,6 +1315,20 @@ async function handleRequest(req: Request) {
       }));
 
       return response(200, { items, count: items.length });
+    }
+
+    if (path === '/admin/order-update-requests' && req.method === 'GET') {
+      await requireAdmin(req);
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      return response(200, {
+        items: (data || []).map((request: any) => mapOrderUpdateRequestRecord(request)),
+        count: (data || []).length
+      });
     }
 
     if (path === '/admin/users' && req.method === 'POST') {
@@ -1107,7 +1372,7 @@ async function handleRequest(req: Request) {
         .from('profiles')
         .update({ name, role, status })
         .eq('id', userId)
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .maybeSingle();
 
       if (error) throw error;
@@ -1178,7 +1443,7 @@ async function handleRequest(req: Request) {
         if (password) {
           const { data } = await adminClient
             .from('profiles')
-            .select('id,name,email,role,status,created_at')
+            .select(PROFILE_SELECT_COLUMNS)
             .eq('id', userId)
             .maybeSingle();
           if (!data) return response(404, { error: 'User not found' });
@@ -1200,7 +1465,7 @@ async function handleRequest(req: Request) {
         .from('profiles')
         .update(updates)
         .eq('id', userId)
-        .select('id,name,email,role,status,created_at')
+        .select(PROFILE_SELECT_COLUMNS)
         .maybeSingle();
 
       if (error) throw error;
@@ -1216,6 +1481,46 @@ async function handleRequest(req: Request) {
           joined: formatShortDate(data.created_at)
         }
       });
+    }
+
+    if (path.startsWith('/admin/order-update-requests/') && req.method === 'PATCH') {
+      const adminUser = await requireAdmin(req);
+      const requestId = Number(path.split('/')[3]);
+      const body = await readJson(req);
+      const status = String(body.status || '').trim();
+      const adminNote = normalizeOptionalText(body.adminNote);
+
+      if (!Number.isInteger(requestId) || requestId < 1) {
+        return response(400, { error: 'Invalid request id' });
+      }
+
+      if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
+        return response(400, { error: 'Invalid status value' });
+      }
+
+      const reviewFields: Record<string, unknown> = {
+        status,
+        admin_note: adminNote || null
+      };
+
+      if (status === 'Pending') {
+        reviewFields.reviewed_by = null;
+        reviewFields.reviewed_at = null;
+      } else {
+        reviewFields.reviewed_by = adminUser.id;
+        reviewFields.reviewed_at = new Date().toISOString();
+      }
+
+      const { data, error } = await adminClient
+        .from('order_update_requests')
+        .update(reviewFields)
+        .eq('id', requestId)
+        .select('id,order_id,user_id,requested_changes,reason,status,admin_note,reviewed_by,reviewed_at,created_at')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return response(404, { error: 'Request not found' });
+
+      return response(200, { request: mapOrderUpdateRequestRecord(data as Record<string, any>) });
     }
 
     if (path.startsWith('/admin/users/') && req.method === 'DELETE') {
@@ -1546,26 +1851,46 @@ async function handleRequest(req: Request) {
 
     if (path === '/orders' && req.method === 'GET') {
       const user = await getUserFromAuth(req);
-      const { data, error } = await adminClient
+      let data = null;
+      let error = null;
+      ({ data, error } = await adminClient
         .from('orders')
-        .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+        .select('id,subtotal,shipping,total,shipping_address,shipping_recipient,shipping_phone,shipping_address_line1,shipping_address_line2,shipping_city,shipping_state,shipping_postal_code,payment_method,status,created_at')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
+      if (error && /column .* does not exist/i.test(String(error.message || ''))) {
+        ({ data, error } = await adminClient
+          .from('orders')
+          .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }));
+      }
       if (error) throw error;
 
-      return response(200, { items: data || [], count: (data || []).length });
+      const items = (data || []).map((order: any) => mapOrderRecord(order));
+      return response(200, { items, count: items.length });
     }
 
     if (path.startsWith('/orders/') && req.method === 'GET') {
       const user = await getUserFromAuth(req);
       const orderId = Number(path.split('/')[2]);
 
-      const { data: order, error: orderError } = await adminClient
+      let order = null;
+      let orderError = null;
+      ({ data: order, error: orderError } = await adminClient
         .from('orders')
-        .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+        .select('id,subtotal,shipping,total,shipping_address,shipping_recipient,shipping_phone,shipping_address_line1,shipping_address_line2,shipping_city,shipping_state,shipping_postal_code,payment_method,status,created_at')
         .eq('id', orderId)
         .eq('user_id', user.id)
-        .maybeSingle();
+        .maybeSingle());
+      if (orderError && /column .* does not exist/i.test(String(orderError.message || ''))) {
+        ({ data: order, error: orderError } = await adminClient
+          .from('orders')
+          .select('id,subtotal,shipping,total,shipping_address,payment_method,status,created_at')
+          .eq('id', orderId)
+          .eq('user_id', user.id)
+          .maybeSingle());
+      }
 
       if (orderError) throw orderError;
       if (!order) return response(404, { error: 'Order not found' });
@@ -1578,7 +1903,14 @@ async function handleRequest(req: Request) {
 
       if (itemError) throw itemError;
 
-      return response(200, { ...order, items: items || [] });
+      return response(200, mapOrderRecord(order as Record<string, any>, (items || []).map((item: any) => ({
+        productId: item.product_id,
+        productName: item.product_name,
+        productCategory: item.product_category,
+        unitPrice: Number(item.unit_price),
+        quantity: item.quantity,
+        totalPrice: Number(item.total_price)
+      }))));
     }
 
     return response(404, { error: 'Route not found' });

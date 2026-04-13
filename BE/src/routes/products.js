@@ -3,6 +3,33 @@ import { all, get } from '../db.js';
 
 const router = Router();
 
+function normalizeGallery(raw) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapProduct(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    price: Number(row.price),
+    category: row.category,
+    image: row.image,
+    shortDescription: row.short_description || row.description,
+    inventoryCount: Number(row.inventory_count ?? 0),
+    isFeatured: Boolean(row.is_featured),
+    gallery: normalizeGallery(row.gallery),
+    rating: Number(row.rating),
+    reviews: row.reviews,
+    description: row.description
+  };
+}
+
 function buildOrderBy(sort) {
   switch (sort) {
     case 'price-low':
@@ -11,6 +38,8 @@ function buildOrderBy(sort) {
       return 'ORDER BY price DESC';
     case 'rating':
       return 'ORDER BY rating DESC, reviews DESC';
+    case 'featured':
+      return 'ORDER BY is_featured DESC, id ASC';
     default:
       return 'ORDER BY id ASC';
   }
@@ -18,9 +47,11 @@ function buildOrderBy(sort) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const { category, sort = 'featured', search } = req.query;
+    const { category, sort = 'featured', search, minPrice, maxPrice, page = 1, limit = 12 } = req.query;
     const where = [];
     const params = [];
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.min(Math.max(Number(limit) || 12, 1), 48);
 
     if (category && category !== 'All') {
       where.push('category = ?');
@@ -32,18 +63,39 @@ router.get('/', async (req, res, next) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
+    if (minPrice !== undefined && minPrice !== '') {
+      where.push('price >= ?');
+      params.push(Number(minPrice));
+    }
+
+    if (maxPrice !== undefined && maxPrice !== '') {
+      where.push('price <= ?');
+      params.push(Number(maxPrice));
+    }
+
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderBy = buildOrderBy(sort);
+    const countRow = await get(`SELECT COUNT(*) AS total FROM products ${whereSql}`, params);
+    const totalItems = Number(countRow?.total || 0);
+    const offset = (pageNumber - 1) * limitNumber;
 
     const products = await all(
-      `SELECT id, name, price, category, image, rating, reviews, description
+      `SELECT id, name, slug, price, category, image, short_description, inventory_count, is_featured, gallery, rating, reviews, description
        FROM products
        ${whereSql}
-       ${orderBy}`,
-      params
+       ${orderBy}
+       LIMIT ? OFFSET ?`,
+      [...params, limitNumber, offset]
     );
 
-    return res.json({ items: products, count: products.length });
+    return res.json({
+      items: products.map(mapProduct),
+      count: products.length,
+      page: pageNumber,
+      limit: limitNumber,
+      totalItems,
+      totalPages: Math.max(Math.ceil(totalItems / limitNumber), 1)
+    });
   } catch (error) {
     return next(error);
   }
@@ -62,7 +114,7 @@ router.get('/categories', async (_req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const product = await get(
-      `SELECT id, name, price, category, image, rating, reviews, description
+      `SELECT id, name, slug, price, category, image, short_description, inventory_count, is_featured, gallery, rating, reviews, description
        FROM products WHERE id = ?`,
       [req.params.id]
     );
@@ -71,7 +123,29 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    return res.json(product);
+    return res.json(mapProduct(product));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/:id/related', async (req, res, next) => {
+  try {
+    const current = await get('SELECT id, category FROM products WHERE id = ?', [req.params.id]);
+    if (!current) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const items = await all(
+      `SELECT id, name, slug, price, category, image, short_description, inventory_count, is_featured, gallery, rating, reviews, description
+       FROM products
+       WHERE category = ? AND id != ?
+       ORDER BY rating DESC, reviews DESC, id ASC
+       LIMIT 4`,
+      [current.category, current.id]
+    );
+
+    return res.json({ items: items.map(mapProduct), count: items.length });
   } catch (error) {
     return next(error);
   }
