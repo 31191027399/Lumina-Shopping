@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import LegacyApp from './App';
 import {
   ArrowLeft,
@@ -138,11 +138,36 @@ function SectionTitle({ eyebrow, title, description, action }) {
 function NavBar({ cartCount, user, onNavigate }) {
   const route = parseRoute();
   const [search, setSearch] = useState(route.search.get('search') || '');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
 
   useEffect(() => {
     const current = parseRoute();
     setSearch(current.search.get('search') || '');
   }, [route.pathname, window.location.search]);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target)) {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [accountMenuOpen]);
 
   const submit = (event) => {
     event.preventDefault();
@@ -187,9 +212,58 @@ function NavBar({ cartCount, user, onNavigate }) {
           </div>
         </form>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => onNavigate(user ? '/account' : '/login')} className="rounded-full border border-slate-200 p-3 text-slate-600">
-            <User className="h-5 w-5" />
-          </button>
+          <div ref={accountMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                if (!user) {
+                  onNavigate('/login');
+                  return;
+                }
+                setAccountMenuOpen((open) => !open);
+              }}
+              className="rounded-full border border-slate-200 p-3 text-slate-600 transition hover:border-sky-200 hover:text-sky-600"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+            >
+              <User className="h-5 w-5" />
+            </button>
+          {user && accountMenuOpen ? (
+              <div className="absolute right-0 top-full z-50 mt-3 w-56 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white p-2 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onNavigate('/account');
+                  }}
+                  className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-sky-600"
+                >
+                  <span>Account</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onLogout?.();
+                  }}
+                  className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
+                >
+                  <span>Sign out</span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.22em]">Logout</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+          {user ? (
+            <button
+              type="button"
+              onClick={() => onLogout?.()}
+              className="hidden rounded-full border border-slate-200 px-4 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-rose-200 hover:text-rose-600 md:inline-flex"
+            >
+              Sign out
+            </button>
+          ) : null}
           <button type="button" onClick={() => onNavigate('/cart')} className="relative rounded-full border border-slate-200 p-3 text-slate-600">
             <ShoppingBag className="h-5 w-5" />
             {cartCount > 0 ? (
@@ -767,14 +841,19 @@ function AccountPage({ user, orders, onNavigate, onLogout, onChangePassword, pas
           <p className="text-xs font-black uppercase tracking-[0.25em] text-sky-100">Account</p>
           <h1 className="mt-4 text-4xl font-black tracking-tight">{user?.name}</h1>
           <p className="mt-2 text-sky-100">{user?.email}</p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={() => onNavigate('/')} className="rounded-full border border-white/20 px-5 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-white transition hover:bg-white/10">
+              Back to store
+            </button>
+            <button type="button" onClick={onLogout} className="rounded-full border border-white/20 px-5 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-white transition hover:bg-white/10">
+              Sign out
+            </button>
+          </div>
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
             <StatCard label="Orders" value={orders.length} />
             <StatCard label="Spent" value={currency(orders.reduce((sum, item) => sum + Number(item.total || 0), 0))} />
             <StatCard label="Role" value={user?.role || 'Customer'} />
           </div>
-          <button type="button" onClick={onLogout} className="mt-8 rounded-full border border-white/20 px-6 py-3 text-xs font-black uppercase tracking-[0.22em] text-white">
-            Sign out
-          </button>
         </div>
 
         <div className="rounded-[2.25rem] border border-slate-200 bg-white p-8">
@@ -1640,6 +1719,27 @@ export default function StorefrontApp() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       {!isLegacyAdminRoute ? <NavBar cartCount={cartCount} user={user} onNavigate={navigate} /> : null}
+      {route.pathname === '/admin' && user?.role === 'Admin' ? (
+        <div className="border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-sky-200 hover:text-sky-600"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to store
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-rose-200 hover:text-rose-600"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      ) : null}
       <main>{content}</main>
       {toast && !isLegacyAdminRoute ? (
         <div className="fixed bottom-8 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-slate-950 px-6 py-4 text-xs font-black uppercase tracking-[0.2em] text-white shadow-2xl">
