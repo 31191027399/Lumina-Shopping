@@ -135,7 +135,7 @@ function SectionTitle({ eyebrow, title, description, action }) {
   );
 }
 
-function NavBar({ cartCount, user, onNavigate }) {
+function NavBar({ cartCount, user, onNavigate, onLogout }) {
   const route = parseRoute();
   const [search, setSearch] = useState(route.search.get('search') || '');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -255,15 +255,6 @@ function NavBar({ cartCount, user, onNavigate }) {
               </div>
             ) : null}
           </div>
-          {user ? (
-            <button
-              type="button"
-              onClick={() => onLogout?.()}
-              className="hidden rounded-full border border-slate-200 px-4 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-rose-200 hover:text-rose-600 md:inline-flex"
-            >
-              Sign out
-            </button>
-          ) : null}
           <button type="button" onClick={() => onNavigate('/cart')} className="relative rounded-full border border-slate-200 p-3 text-slate-600">
             <ShoppingBag className="h-5 w-5" />
             {cartCount > 0 ? (
@@ -1718,25 +1709,33 @@ export default function StorefrontApp() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
-      {!isLegacyAdminRoute ? <NavBar cartCount={cartCount} user={user} onNavigate={navigate} /> : null}
+      {!isLegacyAdminRoute ? <NavBar cartCount={cartCount} user={user} onNavigate={navigate} onLogout={handleLogout} /> : null}
       {route.pathname === '/admin' && user?.role === 'Admin' ? (
-        <div className="border-b border-slate-200 bg-white/95 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-sky-200 hover:text-sky-600"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to store
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-rose-200 hover:text-rose-600"
-            >
-              Sign out
-            </button>
+        <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/97 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex rounded-full bg-slate-950 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.24em] text-white">
+                Admin workspace
+              </span>
+              <span className="text-xs font-semibold text-slate-500">Use the controls below to leave or sign out.</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:flex sm:items-center">
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-slate-200 px-4 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-sky-200 hover:text-sky-600"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to store
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-slate-200 px-4 py-3 text-[11px] font-black uppercase tracking-[0.22em] text-slate-600 transition hover:border-rose-200 hover:text-rose-600"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
