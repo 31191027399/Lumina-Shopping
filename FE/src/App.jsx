@@ -35,6 +35,8 @@ import {
   ChevronDown,
   Edit,
   Save,
+  Copy,
+  KeyRound,
   Info
 } from 'lucide-react';
 
@@ -48,6 +50,13 @@ const FRONTEND_ORIGIN =
 const PASSWORD_RESET_REDIRECT_URL =
   import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL ||
   `${FRONTEND_ORIGIN}/?reset_password=1`;
+const INTEGRATION_SCOPE_OPTIONS = [
+  { id: 'read:catalog', label: 'Read catalog' },
+  { id: 'read:orders', label: 'Read orders' },
+  { id: 'read:users', label: 'Read users' },
+  { id: 'write:cart', label: 'Write cart' },
+  { id: 'write:checkout', label: 'Write checkout' }
+];
 const toKebab = (value) =>
   String(value || '')
     .toLowerCase()
@@ -411,7 +420,10 @@ const AdminDashboard = ({
   orders,
   orderUpdateRequests = [],
   topCategoryLimit,
-  onSaveTopCategoryLimit,
+  platformApiKeyMeta,
+  onSaveAppSettings,
+  onGenerateApiKey,
+  onRevokeApiKey,
   currentUserId,
   onCreateUser,
   onUpdateUser,
@@ -472,10 +484,17 @@ const AdminDashboard = ({
   const [requestReviewDrafts, setRequestReviewDrafts] = useState({});
   const [appSettingsForm, setAppSettingsForm] = useState({ topCategoryLimit });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isMutatingApiKey, setIsMutatingApiKey] = useState(false);
+  const [generatedApiKey, setGeneratedApiKey] = useState('');
+  const [integrationScopeDraft, setIntegrationScopeDraft] = useState(platformApiKeyMeta?.scopes || []);
 
   useEffect(() => {
     setAppSettingsForm({ topCategoryLimit });
   }, [topCategoryLimit]);
+
+  useEffect(() => {
+    setIntegrationScopeDraft(platformApiKeyMeta?.scopes || []);
+  }, [platformApiKeyMeta?.scopes]);
 
   const parseNumericId = (raw) => {
     const parsed = Number(String(raw ?? '').replace(/[^0-9]/g, ''));
@@ -995,6 +1014,51 @@ const AdminDashboard = ({
     }
   };
 
+  const copyGeneratedApiKey = async () => {
+    if (!generatedApiKey) return;
+    try {
+      await navigator.clipboard.writeText(generatedApiKey);
+      onNotify?.('API key copied');
+    } catch (_err) {
+      onNotify?.('Copy failed. Select the key manually.');
+    }
+  };
+
+  const generateApiKey = async () => {
+    const shouldRotate = !platformApiKeyMeta?.hasApiKey || confirm('Generate a new API key? The existing key will stop working.');
+    if (!shouldRotate) return;
+    setIsMutatingApiKey(true);
+    try {
+      const data = await onGenerateApiKey?.(integrationScopeDraft);
+      setGeneratedApiKey(data?.apiKey || '');
+      onNotify?.('API key generated');
+    } catch (err) {
+      onNotify?.(err.message || 'Failed to generate API key');
+    } finally {
+      setIsMutatingApiKey(false);
+    }
+  };
+
+  const toggleIntegrationScope = (scopeId) => {
+    setIntegrationScopeDraft((prev) =>
+      prev.includes(scopeId) ? prev.filter((scope) => scope !== scopeId) : [...prev, scopeId]
+    );
+  };
+
+  const revokeApiKey = async () => {
+    if (!confirm('Revoke the current API key? External platforms using it will lose access.')) return;
+    setIsMutatingApiKey(true);
+    try {
+      await onRevokeApiKey?.();
+      setGeneratedApiKey('');
+      onNotify?.('API key revoked');
+    } catch (err) {
+      onNotify?.(err.message || 'Failed to revoke API key');
+    } finally {
+      setIsMutatingApiKey(false);
+    }
+  };
+
   // Edit Handlers
   const handleSaveEdit = async (e) => {
     e.preventDefault();
@@ -1251,13 +1315,122 @@ const AdminDashboard = ({
                 />
                 <p className="text-xs text-gray-400">Controls how many top categories are shown on homepage for all users.</p>
               </div>
+              <div className="max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <KeyRound size={18} className="text-indigo-600" />
+                      <h4 className="text-sm font-black uppercase tracking-widest text-gray-700">Platform API Key</h4>
+                    </div>
+                    <p className="text-xs font-medium text-gray-400">
+                      External platforms can call protected backend endpoints with this key in the x-api-key header.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={isMutatingApiKey}
+                      onClick={generateApiKey}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-40"
+                    >
+                      {platformApiKeyMeta?.hasApiKey ? 'Rotate Key' : 'Generate Key'}
+                    </button>
+                    {generatedApiKey ? (
+                      <button
+                        type="button"
+                        onClick={copyGeneratedApiKey}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 hover:border-slate-300 hover:text-slate-950"
+                      >
+                        <Copy size={14} /> Copy Key
+                      </button>
+                    ) : null}
+                    {platformApiKeyMeta?.hasApiKey ? (
+                      <button
+                        type="button"
+                        disabled={isMutatingApiKey}
+                        onClick={revokeApiKey}
+                        className="px-4 py-2 rounded-xl border border-rose-200 bg-rose-50 text-xs font-black uppercase tracking-widest text-rose-600 hover:bg-rose-100 disabled:opacity-40"
+                      >
+                        Revoke
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {platformApiKeyMeta?.hasApiKey ? (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl bg-white px-4 py-3 border border-slate-200">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Current Key</p>
+                      <p className="mt-1 break-all text-sm font-black text-gray-800">{platformApiKeyMeta.maskedApiKey}</p>
+                    </div>
+                    <div className="rounded-xl bg-white px-4 py-3 border border-slate-200">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Created</p>
+                      <p className="mt-1 text-sm font-bold text-gray-700">
+                        {platformApiKeyMeta.createdAt ? new Date(platformApiKeyMeta.createdAt).toLocaleString() : 'Unknown'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white px-4 py-3 border border-slate-200">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Last Used</p>
+                      <p className="mt-1 text-sm font-bold text-gray-700">
+                        {platformApiKeyMeta.lastUsedAt ? new Date(platformApiKeyMeta.lastUsedAt).toLocaleString() : 'Never'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm font-semibold text-slate-500">
+                    No platform API key has been generated yet.
+                  </div>
+                )}
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Allowed Scopes</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {INTEGRATION_SCOPE_OPTIONS.map((scope) => (
+                      <label
+                        key={scope.id}
+                        className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-bold transition ${
+                          integrationScopeDraft.includes(scope.id)
+                            ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 bg-white text-slate-500'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={integrationScopeDraft.includes(scope.id)}
+                          onChange={() => toggleIntegrationScope(scope.id)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
+                        />
+                        <span>{scope.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                {generatedApiKey ? (
+                  <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-amber-700">New key shown once</p>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <code className="min-w-0 flex-1 break-all rounded-xl bg-white px-4 py-3 text-xs font-bold text-slate-800">
+                        {generatedApiKey}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={copyGeneratedApiKey}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-black"
+                      >
+                        <Copy size={14} /> Copy
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <div>
                 <button
                   disabled={isSavingSettings}
                   onClick={async () => {
                     setIsSavingSettings(true);
                     try {
-                      await onSaveTopCategoryLimit?.(appSettingsForm.topCategoryLimit);
+                      await onSaveAppSettings?.({
+                        topCategoryLimit: appSettingsForm.topCategoryLimit,
+                        platformApiKeyScopes: integrationScopeDraft
+                      });
                     } finally {
                       setIsSavingSettings(false);
                     }
@@ -2289,6 +2462,13 @@ export default function App({ initialPage = 'home', embedded = false }) {
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [topCategoryLimit, setTopCategoryLimit] = useState(3);
+  const [platformApiKeyMeta, setPlatformApiKeyMeta] = useState({
+    hasApiKey: false,
+    maskedApiKey: '',
+    createdAt: '',
+    lastUsedAt: '',
+    scopes: []
+  });
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState([]);
   const [user, setUser] = useState(null);
@@ -2391,14 +2571,25 @@ export default function App({ initialPage = 'home', embedded = false }) {
 
   const fetchAdminData = async (token = authToken) => {
     if (!token) return;
-    const [usersData, ordersData, requestData] = await Promise.all([
+    const [usersData, ordersData, requestData, settingsData] = await Promise.all([
       apiRequest('/admin/users', { token }),
       apiRequest('/admin/orders', { token }),
-      apiRequest('/admin/order-update-requests', { token })
+      apiRequest('/admin/order-update-requests', { token }),
+      apiRequest('/admin/settings', { token })
     ]);
     setUsers(usersData.items || []);
     setOrders(ordersData.items || []);
     setAdminOrderUpdateRequests(requestData.items || []);
+    const rawLimit = Number(settingsData?.topCategoryLimit);
+    const normalizedLimit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 12) : 3;
+    setTopCategoryLimit(normalizedLimit);
+    setPlatformApiKeyMeta({
+      hasApiKey: Boolean(settingsData?.platformApiKey?.hasApiKey),
+      maskedApiKey: String(settingsData?.platformApiKey?.maskedApiKey || ''),
+      createdAt: String(settingsData?.platformApiKey?.createdAt || ''),
+      lastUsedAt: String(settingsData?.platformApiKey?.lastUsedAt || ''),
+      scopes: Array.isArray(settingsData?.platformApiKey?.scopes) ? settingsData.platformApiKey.scopes : []
+    });
   };
 
   const fetchCatalogData = async () => {
@@ -2559,6 +2750,13 @@ export default function App({ initialPage = 'home', embedded = false }) {
     setUserOrders([]);
     setOrderUpdateRequests([]);
     setAdminOrderUpdateRequests([]);
+    setPlatformApiKeyMeta({
+      hasApiKey: false,
+      maskedApiKey: '',
+      createdAt: '',
+      lastUsedAt: '',
+      scopes: []
+    });
     setCart([]);
     navigateTo('home');
   };
@@ -2717,22 +2915,53 @@ export default function App({ initialPage = 'home', embedded = false }) {
     );
   };
 
-  const handleTopCategoryLimitSave = async (rawValue) => {
+  const handleAppSettingsSave = async ({ topCategoryLimit: rawValue, platformApiKeyScopes }) => {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return;
     const normalized = Math.min(Math.max(Math.floor(parsed), 1), 12);
     try {
       const data = await apiRequest('/admin/settings', {
         method: 'PATCH',
-        body: { topCategoryLimit: normalized }
+        body: { topCategoryLimit: normalized, platformApiKeyScopes }
       });
       const saved = Number(data?.topCategoryLimit);
       setTopCategoryLimit(Number.isFinite(saved) ? Math.min(Math.max(Math.floor(saved), 1), 12) : normalized);
-      setToast('Homepage top categories updated');
+      setPlatformApiKeyMeta({
+        hasApiKey: Boolean(data?.platformApiKey?.hasApiKey),
+        maskedApiKey: String(data?.platformApiKey?.maskedApiKey || ''),
+        createdAt: String(data?.platformApiKey?.createdAt || ''),
+        lastUsedAt: String(data?.platformApiKey?.lastUsedAt || ''),
+        scopes: Array.isArray(data?.platformApiKey?.scopes) ? data.platformApiKey.scopes : []
+      });
+      setToast('Admin settings updated');
     } catch (err) {
-      setToast(err.message || 'Failed to update homepage top categories');
+      setToast(err.message || 'Failed to update admin settings');
       throw err;
     }
+  };
+
+  const handleApiKeyGenerate = async (scopes = []) => {
+    const data = await apiRequest('/admin/api-key', { method: 'POST', body: { scopes } });
+    setPlatformApiKeyMeta({
+      hasApiKey: Boolean(data?.hasApiKey),
+      maskedApiKey: String(data?.maskedApiKey || ''),
+      createdAt: String(data?.createdAt || ''),
+      lastUsedAt: String(data?.lastUsedAt || ''),
+      scopes: Array.isArray(data?.scopes) ? data.scopes : []
+    });
+    return data;
+  };
+
+  const handleApiKeyRevoke = async () => {
+    const data = await apiRequest('/admin/api-key', { method: 'DELETE' });
+    setPlatformApiKeyMeta({
+      hasApiKey: Boolean(data?.hasApiKey),
+      maskedApiKey: String(data?.maskedApiKey || ''),
+      createdAt: String(data?.createdAt || ''),
+      lastUsedAt: String(data?.lastUsedAt || ''),
+      scopes: Array.isArray(data?.scopes) ? data.scopes : []
+    });
+    return data;
   };
 
   const handleOrderComplete = async () => {
@@ -2767,7 +2996,10 @@ export default function App({ initialPage = 'home', embedded = false }) {
           orders={orders}
           orderUpdateRequests={adminOrderUpdateRequests}
           topCategoryLimit={topCategoryLimit}
-          onSaveTopCategoryLimit={handleTopCategoryLimitSave}
+          platformApiKeyMeta={platformApiKeyMeta}
+          onSaveAppSettings={handleAppSettingsSave}
+          onGenerateApiKey={handleApiKeyGenerate}
+          onRevokeApiKey={handleApiKeyRevoke}
           currentUserId={user?.id}
           onCreateUser={handleAdminUserCreate}
           onUpdateUser={handleAdminUserUpdate}

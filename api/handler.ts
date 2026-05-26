@@ -6,6 +6,7 @@ type UserContext = {
   id: string;
   email: string;
   role: string;
+  scopes?: string[];
 };
 
 const PRODUCT_TEMPLATE_POOL = [
@@ -174,6 +175,8 @@ const FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Riley', 'Casey', 'Av
 const LAST_NAMES = ['Nguyen', 'Tran', 'Pham', 'Le', 'Hoang', 'Vo', 'Do', 'Bui', 'Dang', 'Huynh'];
 const DEFAULT_TOP_CATEGORY_LIMIT = 3;
 const TOP_CATEGORY_LIMIT_KEY = 'homepage_top_categories_limit';
+const PLATFORM_API_KEY_KEY = 'platform_api_key';
+const INTEGRATION_SCOPES = ['read:catalog', 'read:orders', 'read:users', 'write:cart', 'write:checkout'];
 const PROFILE_SELECT_COLUMNS =
   'id,name,email,phone,address_line1,address_line2,address_city,address_state,address_postal_code,role,status,created_at';
 const ORDER_UPDATE_REQUEST_ALLOWED_FIELDS = [
@@ -245,7 +248,7 @@ function response(status: number, data: Json) {
       Pragma: 'no-cache',
       Expires: '0',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      'Access-Control-Allow-Headers': 'authorization, x-api-key, x-client-info, apikey, content-type',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
     }
   });
@@ -259,7 +262,7 @@ function noContent() {
       Pragma: 'no-cache',
       Expires: '0',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      'Access-Control-Allow-Headers': 'authorization, x-api-key, x-client-info, apikey, content-type',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS'
     }
   });
@@ -744,6 +747,159 @@ async function readTopCategoryLimit() {
   return DEFAULT_TOP_CATEGORY_LIMIT;
 }
 
+function getPlatformApiKeyFromRequest(req: Request) {
+  const headerKey = req.headers.get('x-api-key') || req.headers.get('apikey') || '';
+  if (headerKey.trim()) return headerKey.trim();
+
+  const authHeader = req.headers.get('authorization') || '';
+  if (authHeader.startsWith('ApiKey ')) return authHeader.slice('ApiKey '.length).trim();
+  if (authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.slice('Bearer '.length).trim();
+    if (bearerToken.startsWith('lumina_')) return bearerToken;
+  }
+  return '';
+}
+
+function generatePlatformApiKey() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const encoded = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return `lumina_${encoded}`;
+}
+
+function normalizeIntegrationScopes(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((scope) => String(scope || '').trim()).filter((scope) => INTEGRATION_SCOPES.includes(scope));
+}
+
+async function sha256Hex(value: string) {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function readPlatformApiKeyRecord() {
+  const { data, error } = await adminClient
+    .from('app_settings')
+    .select('value')
+    .eq('key', PLATFORM_API_KEY_KEY)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSettingsTableError(error)) return null;
+    throw error;
+  }
+
+  const value = data?.value;
+  if (value && typeof value === 'object' && typeof (value as any).hash === 'string') {
+    return value as Record<string, any>;
+  }
+  return null;
+}
+
+function mapPlatformApiKeyRecord(record: Record<string, any> | null) {
+  if (!record?.hash) {
+    return {
+      hasApiKey: false,
+      maskedApiKey: '',
+      createdAt: '',
+      lastUsedAt: '',
+      scopes: []
+    };
+  }
+
+  const prefix = String(record.prefix || '');
+  const suffix = String(record.suffix || '');
+  return {
+    hasApiKey: true,
+    maskedApiKey: prefix && suffix ? `${prefix}${'*'.repeat(12)}${suffix}` : 'Saved API key',
+    createdAt: String(record.createdAt || ''),
+    lastUsedAt: String(record.lastUsedAt || ''),
+    scopes: normalizeIntegrationScopes(record.scopes)
+  };
+}
+
+async function createPlatformApiKey(adminUser: UserContext, scopes: string[] = []) {
+  const apiKey = generatePlatformApiKey();
+  const hash = await sha256Hex(apiKey);
+  const now = new Date().toISOString();
+  const value = {
+    hash,
+    prefix: apiKey.slice(0, 11),
+    suffix: apiKey.slice(-4),
+    scopes: normalizeIntegrationScopes(scopes),
+    createdAt: now,
+    createdBy: adminUser.id,
+    lastUsedAt: ''
+  };
+
+  const { error } = await adminClient.from('app_settings').upsert(
+    {
+      key: PLATFORM_API_KEY_KEY,
+      value
+    },
+    { onConflict: 'key' }
+  );
+  if (error) throw error;
+
+  return {
+    apiKey,
+    ...mapPlatformApiKeyRecord(value)
+  };
+}
+
+async function revokePlatformApiKey() {
+  const { error } = await adminClient.from('app_settings').delete().eq('key', PLATFORM_API_KEY_KEY);
+  if (error && !isMissingSettingsTableError(error)) throw error;
+  return mapPlatformApiKeyRecord(null);
+}
+
+async function updatePlatformApiKeyScopes(rawScopes: unknown) {
+  const record = await readPlatformApiKeyRecord();
+  if (!record?.hash) return mapPlatformApiKeyRecord(null);
+  const value = { ...record, scopes: normalizeIntegrationScopes(rawScopes) };
+  const { error } = await adminClient
+    .from('app_settings')
+    .upsert({ key: PLATFORM_API_KEY_KEY, value }, { onConflict: 'key' });
+  if (error) throw error;
+  return mapPlatformApiKeyRecord(value);
+}
+
+async function validatePlatformApiKey(req: Request) {
+  const apiKey = getPlatformApiKeyFromRequest(req);
+  if (!apiKey) return null;
+
+  const record = await readPlatformApiKeyRecord();
+  if (!record?.hash) return null;
+
+  const incomingHash = await sha256Hex(apiKey);
+  if (incomingHash !== String(record.hash)) return null;
+
+  const now = new Date().toISOString();
+  await adminClient
+    .from('app_settings')
+    .upsert({ key: PLATFORM_API_KEY_KEY, value: { ...record, lastUsedAt: now } }, { onConflict: 'key' });
+
+  return {
+    id: 'platform-api-key',
+    email: '',
+    role: 'Integration',
+    scopes: normalizeIntegrationScopes(record.scopes)
+  };
+}
+
+async function readAdminSettings() {
+  const [topCategoryLimit, platformApiKeyRecord] = await Promise.all([readTopCategoryLimit(), readPlatformApiKeyRecord()]);
+  return {
+    topCategoryLimit,
+    platformApiKey: mapPlatformApiKeyRecord(platformApiKeyRecord)
+  };
+}
+
 async function writeTopCategoryLimit(raw: unknown) {
   const topCategoryLimit = normalizeTopCategoryLimit(raw);
   const { error } = await adminClient
@@ -759,6 +915,150 @@ async function requireAdmin(req: Request) {
     throw new Error('Forbidden');
   }
   return user;
+}
+
+async function requirePlatformIntegration(req: Request, scope: string) {
+  const integrationUser = await validatePlatformApiKey(req);
+  if (!integrationUser) {
+    throw new Error('Unauthorized');
+  }
+  if (!integrationUser.scopes?.includes(scope)) {
+    throw new Error('Forbidden');
+  }
+  return integrationUser;
+}
+
+async function getAdminOrderList() {
+  const { data, error } = await adminClient
+    .from('orders')
+    .select('id,total,status,created_at,user_id')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const userIds = Array.from(new Set((data || []).map((o: any) => o.user_id))).filter(Boolean);
+  const { data: profiles } = userIds.length
+    ? await adminClient.from('profiles').select('id,name,email').in('id', userIds)
+    : { data: [] as any[] };
+  const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+  const items = (data || []).map((o: any) => {
+    const profile = profileMap.get(o.user_id);
+    return {
+      id: `#ORD-${String(o.id).padStart(4, '0')}`,
+      orderId: o.id,
+      customer: profile?.name || profile?.email || 'Unknown',
+      createdAt: o.created_at,
+      date: formatShortDate(o.created_at),
+      total: Number(o.total),
+      status: o.status
+    };
+  });
+
+  return { items, count: items.length };
+}
+
+async function getIntegrationCustomer(input: Record<string, any>, url?: URL) {
+  const customerId = String(input.customerId || url?.searchParams.get('customerId') || '').trim();
+  const customerEmail = String(input.customerEmail || url?.searchParams.get('customerEmail') || '').trim().toLowerCase();
+
+  if (!customerId && !customerEmail) {
+    throw new Error('customerEmail or customerId is required');
+  }
+
+  let query = adminClient.from('profiles').select(PROFILE_SELECT_COLUMNS);
+  if (customerId) {
+    query = query.eq('id', customerId);
+  } else {
+    query = query.eq('email', customerEmail);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new Error('Customer not found');
+  }
+  return data as Record<string, any>;
+}
+
+async function addIntegrationCartItem(customerId: string, productId: number, quantity: number) {
+  if (!Number.isInteger(productId) || !Number.isInteger(quantity) || quantity < 1) {
+    throw new Error('Invalid productId or quantity');
+  }
+
+  const { data: product } = await adminClient.from('products').select('id').eq('id', productId).maybeSingle();
+  if (!product) throw new Error('Product not found');
+
+  const { data: existing } = await adminClient
+    .from('cart_items')
+    .select('quantity')
+    .eq('user_id', customerId)
+    .eq('product_id', productId)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await adminClient
+      .from('cart_items')
+      .update({ quantity: existing.quantity + quantity })
+      .eq('user_id', customerId)
+      .eq('product_id', productId);
+    if (error) throw error;
+  } else {
+    const { error } = await adminClient
+      .from('cart_items')
+      .insert({ user_id: customerId, product_id: productId, quantity });
+    if (error) throw error;
+  }
+
+  return getCartSummary(customerId);
+}
+
+async function updateIntegrationCartItem(customerId: string, productId: number, quantity: number) {
+  if (!Number.isInteger(productId) || !Number.isInteger(quantity) || quantity < 1) {
+    throw new Error('Invalid productId or quantity');
+  }
+
+  const { data, error } = await adminClient
+    .from('cart_items')
+    .update({ quantity })
+    .eq('user_id', customerId)
+    .eq('product_id', productId)
+    .select('product_id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Cart item not found');
+  return getCartSummary(customerId);
+}
+
+async function removeIntegrationCartItem(customerId: string, productId: number) {
+  if (!Number.isInteger(productId)) throw new Error('Invalid productId');
+  const { data, error } = await adminClient
+    .from('cart_items')
+    .delete()
+    .eq('user_id', customerId)
+    .eq('product_id', productId)
+    .select('product_id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Cart item not found');
+  return getCartSummary(customerId);
+}
+
+async function checkoutIntegrationCart(customerId: string, body: Record<string, any>) {
+  const shippingAddress = body.shippingAddress ? String(body.shippingAddress) : String(body.shippingAddressLine1 || '');
+  const paymentMethod = body.paymentMethod ? String(body.paymentMethod) : 'card';
+
+  const { data, error } = await adminClient.rpc('create_order_from_cart', {
+    p_user_id: customerId,
+    p_shipping_address: shippingAddress,
+    p_payment_method: paymentMethod
+  });
+
+  if (error) {
+    if (error.message.toLowerCase().includes('cart is empty')) {
+      throw new Error('Cart is empty');
+    }
+    throw error;
+  }
+
+  return { order: data };
 }
 
 async function getCartSummary(userId: string) {
@@ -884,6 +1184,11 @@ async function handleRequest(req: Request) {
     if (path === '/settings' && req.method === 'GET') {
       const topCategoryLimit = await readTopCategoryLimit();
       return response(200, { topCategoryLimit });
+    }
+
+    if (path === '/admin/settings' && req.method === 'GET') {
+      await requireAdmin(req);
+      return response(200, await readAdminSettings());
     }
 
     if (path.startsWith('/products/') && req.method === 'GET') {
@@ -1715,32 +2020,7 @@ async function handleRequest(req: Request) {
 
     if (path === '/admin/orders' && req.method === 'GET') {
       await requireAdmin(req);
-      const { data, error } = await adminClient
-        .from('orders')
-        .select('id,total,status,created_at,user_id')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-
-      const userIds = Array.from(new Set((data || []).map((o: any) => o.user_id))).filter(Boolean);
-      const { data: profiles } = userIds.length
-        ? await adminClient.from('profiles').select('id,name,email').in('id', userIds)
-        : { data: [] as any[] };
-      const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
-
-      const items = (data || []).map((o: any) => {
-        const profile = profileMap.get(o.user_id);
-        return {
-        id: `#ORD-${String(o.id).padStart(4, '0')}`,
-        orderId: o.id,
-        customer: profile?.name || profile?.email || 'Unknown',
-        createdAt: o.created_at,
-        date: formatShortDate(o.created_at),
-        total: Number(o.total),
-        status: o.status
-        };
-      });
-
-      return response(200, { items, count: items.length });
+      return response(200, await getAdminOrderList());
     }
 
     if (path.startsWith('/admin/orders/') && req.method === 'PATCH') {
@@ -2021,8 +2301,127 @@ async function handleRequest(req: Request) {
     if (path === '/admin/settings' && req.method === 'PATCH') {
       await requireAdmin(req);
       const body = await readJson(req);
-      const topCategoryLimit = await writeTopCategoryLimit(body.topCategoryLimit);
+      const [topCategoryLimit, platformApiKey] = await Promise.all([
+        writeTopCategoryLimit(body.topCategoryLimit),
+        Object.prototype.hasOwnProperty.call(body, 'platformApiKeyScopes')
+          ? updatePlatformApiKeyScopes(body.platformApiKeyScopes)
+          : Promise.resolve(mapPlatformApiKeyRecord(await readPlatformApiKeyRecord()))
+      ]);
+      return response(200, {
+        topCategoryLimit,
+        platformApiKey
+      });
+    }
+
+    if (path === '/admin/api-key' && req.method === 'POST') {
+      const adminUser = await requireAdmin(req);
+      const body = await readJson(req);
+      return response(201, await createPlatformApiKey(adminUser, normalizeIntegrationScopes(body.scopes)));
+    }
+
+    if (path === '/admin/api-key' && req.method === 'DELETE') {
+      await requireAdmin(req);
+      return response(200, await revokePlatformApiKey());
+    }
+
+    if (path === '/integrations/orders' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'read:orders');
+      return response(200, await getAdminOrderList());
+    }
+
+    if (path === '/integrations/products' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'read:catalog');
+      const category = url.searchParams.get('category');
+      const search = url.searchParams.get('search');
+      const sort = url.searchParams.get('sort');
+      const minPrice = url.searchParams.get('minPrice');
+      const maxPrice = url.searchParams.get('maxPrice');
+      const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 12), 1), 48);
+      const order = parseSort(sort);
+
+      let query = adminClient.from('products').select('*', { count: 'exact' });
+      if (category && category !== 'All') query = query.eq('category', category);
+      if (search) query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+      if (minPrice) query = query.gte('price', Number(minPrice));
+      if (maxPrice) query = query.lte('price', Number(maxPrice));
+
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+      const { data, error, count } = await query.order(order.column, { ascending: order.ascending }).range(from, to);
+      if (error) throw error;
+      const items = (data || []).map((item: any) => mapProductRecord(item));
+      const totalItems = Number(count || 0);
+      return response(200, {
+        items,
+        count: items.length,
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.max(Math.ceil(totalItems / limit), 1)
+      });
+    }
+
+    if (path === '/integrations/categories' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'read:catalog');
+      const { data, error } = await adminClient.from('products').select('category').order('category');
+      if (error) throw error;
+      return response(200, { items: ['All', ...Array.from(new Set((data || []).map((x: any) => x.category)))] });
+    }
+
+    if (path === '/integrations/settings' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'read:catalog');
+      const topCategoryLimit = await readTopCategoryLimit();
       return response(200, { topCategoryLimit });
+    }
+
+    if (path === '/integrations/users' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'read:users');
+      const { data, error } = await adminClient
+        .from('profiles')
+        .select(PROFILE_SELECT_COLUMNS)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const items = (data || []).map((profile: any) =>
+        mapProfileRecord(profile, { id: profile.id, email: profile.email || '', role: profile.role || 'Customer' })
+      );
+      return response(200, { items, count: items.length });
+    }
+
+    if (path === '/integrations/cart' && req.method === 'GET') {
+      await requirePlatformIntegration(req, 'write:cart');
+      const customer = await getIntegrationCustomer({}, url);
+      return response(200, await getCartSummary(String(customer.id)));
+    }
+
+    if (path === '/integrations/cart/items' && req.method === 'POST') {
+      await requirePlatformIntegration(req, 'write:cart');
+      const body = await readJson(req);
+      const customer = await getIntegrationCustomer(body, url);
+      return response(201, await addIntegrationCartItem(String(customer.id), Number(body.productId), Number(body.quantity || 1)));
+    }
+
+    if (path.startsWith('/integrations/cart/items/') && req.method === 'PATCH') {
+      await requirePlatformIntegration(req, 'write:cart');
+      const body = await readJson(req);
+      const customer = await getIntegrationCustomer(body, url);
+      const productId = Number(path.split('/')[4]);
+      return response(200, await updateIntegrationCartItem(String(customer.id), productId, Number(body.quantity)));
+    }
+
+    if (path.startsWith('/integrations/cart/items/') && req.method === 'DELETE') {
+      await requirePlatformIntegration(req, 'write:cart');
+      const body = await readJson(req);
+      const customer = await getIntegrationCustomer(body, url);
+      const productId = Number(path.split('/')[4]);
+      return response(200, await removeIntegrationCartItem(String(customer.id), productId));
+    }
+
+    if (path === '/integrations/checkout' && req.method === 'POST') {
+      await requirePlatformIntegration(req, 'write:checkout');
+      const body = await readJson(req);
+      const customer = await getIntegrationCustomer(body, url);
+      return response(201, await checkoutIntegrationCart(String(customer.id), body));
     }
 
     if (path === '/orders' && req.method === 'GET') {
